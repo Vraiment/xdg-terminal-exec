@@ -116,3 +116,26 @@ fn ignores_missing_data_directory(command_path: &Path) {
         .success()
         .stdout("default terminal\n");
 }
+
+#[test]
+fn uses_locally_configured_entry_with_bash() {
+    uses_locally_configured_entry(&shell_script_path());
+}
+
+#[test]
+#[ignore]
+fn uses_locally_configured_entry_with_rust() {
+    uses_locally_configured_entry(&executable_path());
+}
+
+fn uses_locally_configured_entry(command_path: &Path) {
+    build_command(command_path)
+        .env(
+            "XDG_CONFIG_HOME",
+            tests_dir().join("config").join("default"),
+        )
+        .env("XDG_DATA_HOME", tests_dir().join("data").join("default"))
+        .assert()
+        .success()
+        .stdout("default terminal\n");
+}
