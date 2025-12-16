@@ -86,3 +86,33 @@ fn ignores_missing_config_directory(command_path: &Path) {
         .success()
         .stdout("default terminal\n");
 }
+
+#[test]
+fn ignores_missing_data_directory_with_bash() {
+    ignores_missing_data_directory(&shell_script_path());
+}
+
+#[test]
+#[ignore]
+fn ignores_missing_data_directory_with_rust() {
+    ignores_missing_data_directory(&executable_path());
+}
+
+fn ignores_missing_data_directory(command_path: &Path) {
+    let xdg_data_dirs = [
+        tests_dir().join("missing"),
+        tests_dir().join("data").join("default"),
+    ]
+    .map(|path| path.into_os_string().into_string().unwrap())
+    .join(":");
+
+    build_command(command_path)
+        .env(
+            "XDG_CONFIG_DIRS",
+            tests_dir().join("config").join("default"),
+        )
+        .env("XDG_DATA_DIRS", xdg_data_dirs)
+        .assert()
+        .success()
+        .stdout("default terminal\n");
+}
