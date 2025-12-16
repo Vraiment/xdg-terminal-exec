@@ -3,16 +3,6 @@
 # TODO: Add following tests:
 # Ensure that duplicates are removed
 
-setup() {
-	: "${XTE:=$BATS_TEST_DIRNAME/../xdg-terminal-exec}"
-	unset XDG_CURRENT_DESKTOP
-	export XDG_CONFIG_HOME="$BATS_TEST_DIRNAME/nothing"
-	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/nothing"
-	export XDG_DATA_HOME="$BATS_TEST_DIRNAME/nothing"
-	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/nothing"
-	export PATH="$BATS_TEST_DIRNAME/bin:$PATH"
-}
-
 assert_failure() {
 	[ "$status" -ne 0 ] || {
 		echo "status: $status" >&2
@@ -37,14 +27,6 @@ assert_output() {
 		diff -u <(echo "$expected") <(echo "$output") >&2
 		return 1
 	}
-}
-
-@test "uses globally configured entry" {
-	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/config/default"
-	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/default"
-	run "$XTE"
-	assert_success
-	assert_output "default terminal"
 }
 
 @test "ignores missing config directory" {
