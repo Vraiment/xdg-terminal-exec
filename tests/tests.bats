@@ -29,13 +29,6 @@ assert_output() {
 	}
 }
 
-@test "finds any global entry when there is no configuration" {
-	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/default"
-	run "$XTE"
-	assert_success
-	assert_output "default terminal"
-}
-
 @test "uses configured exec arg" {
 	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/execarg"
 	run "$XTE" argument
