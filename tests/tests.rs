@@ -596,3 +596,26 @@ fn fails_on_globally_configured_entry_with_missing_action(command_path: &Path) {
         .assert()
         .failure();
 }
+
+#[test]
+fn ignores_comments_blank_lines_and_trailing_whitespace_with_bash() {
+    ignores_comments_blank_lines_and_trailing_whitespace(&shell_script_path());
+}
+
+#[test]
+#[ignore]
+fn ignores_comments_blank_lines_and_trailing_whitespace_with_rust() {
+    ignores_comments_blank_lines_and_trailing_whitespace(&executable_path());
+}
+
+fn ignores_comments_blank_lines_and_trailing_whitespace(command_path: &Path) {
+    build_command(command_path)
+        .env(
+            "XDG_CONFIG_DIRS",
+            tests_dir().join("config").join("whitespace"),
+        )
+        .env("XDG_DATA_DIRS", tests_dir().join("data").join("default"))
+        .assert()
+        .success()
+        .stdout("default terminal\n");
+}

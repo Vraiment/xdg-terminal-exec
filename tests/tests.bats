@@ -29,14 +29,6 @@ assert_output() {
 	}
 }
 
-@test "ignores comments, blank lines, and trailing whitespace" {
-	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/config/whitespace"
-	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/default"
-	run "$XTE"
-	assert_success
-	assert_output "default terminal"
-}
-
 @test "output of --print* options" {
 	export XDG_DATA_HOME="$BATS_TEST_DIRNAME/data/preferred"
 	run "$XTE" --print-cmd=';;' --print-path --print-id --print-delimiter='\n\n' and 'custom arguments' 'with
