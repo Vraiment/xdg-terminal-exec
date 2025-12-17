@@ -258,3 +258,35 @@ fn finds_any_local_entry_when_there_is_no_configuration(command_path: &Path) {
         .success()
         .stdout("default terminal\n");
 }
+
+#[test]
+fn prefers_earlier_configured_entry_with_rust_with_bash() {
+    prefers_earlier_configured_entry(&shell_script_path());
+}
+
+#[test]
+#[ignore]
+fn prefers_earlier_configured_entry_with_rust() {
+    prefers_earlier_configured_entry(&executable_path());
+}
+
+fn prefers_earlier_configured_entry(command_path: &Path) {
+    build_command(command_path)
+        .env(
+            "XDG_CONFIG_DIRS",
+            join_os_strs_to_env_var_list(&[
+                tests_dir().join("config").join("preferred").as_os_str(),
+                tests_dir().join("config").join("default").as_os_str(),
+            ]),
+        )
+        .env(
+            "XDG_DATA_DIRS",
+            join_os_strs_to_env_var_list(&[
+                tests_dir().join("data").join("preferred").as_os_str(),
+                tests_dir().join("data").join("default").as_os_str(),
+            ]),
+        )
+        .assert()
+        .success()
+        .stdout("preferred terminal\n");
+}

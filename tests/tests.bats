@@ -29,14 +29,6 @@ assert_output() {
 	}
 }
 
-@test "prefers earlier configured entry" {
-	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/config/preferred:$BATS_TEST_DIRNAME/config/default"
-	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/preferred:$BATS_TEST_DIRNAME/data/default"
-	run "$XTE"
-	assert_success
-	assert_output "preferred terminal"
-}
-
 @test "prefers locally configured entry" {
 	export XDG_CONFIG_HOME="$BATS_TEST_DIRNAME/config/preferred"
 	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/config/default"
