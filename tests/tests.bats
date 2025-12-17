@@ -29,13 +29,6 @@ assert_output() {
 	}
 }
 
-@test "deals with large desktop entries" {
-	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/huge"
-	run "$XTE"
-	assert_success
-	assert_output "huge terminal"
-}
-
 @test "finds any local entry when there is no configuration" {
 	export XDG_DATA_HOME="$BATS_TEST_DIRNAME/data/default"
 	run "$XTE"

@@ -198,3 +198,22 @@ fn adds_default_exec_arg(command_path: &Path) {
         .success()
         .stdout("default terminal -e argument\n");
 }
+
+#[test]
+fn deals_with_large_desktop_entries_with_bash() {
+    deals_with_large_desktop_entries(&shell_script_path());
+}
+
+#[test]
+#[ignore]
+fn deals_with_large_desktop_entries_with_rust() {
+    deals_with_large_desktop_entries(&executable_path());
+}
+
+fn deals_with_large_desktop_entries(command_path: &Path) {
+    build_command(command_path)
+        .env("XDG_DATA_DIRS", tests_dir().join("data").join("huge"))
+        .assert()
+        .success()
+        .stdout("huge terminal\n");
+}
