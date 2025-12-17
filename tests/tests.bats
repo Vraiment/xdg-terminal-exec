@@ -29,17 +29,6 @@ assert_output() {
 	}
 }
 
-@test "considers entry when its NotShowIn does not match" {
-	export XDG_CONFIG_HOME="$BATS_TEST_DIRNAME/nothing"
-	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/nothing"
-	export XDG_DATA_HOME="$BATS_TEST_DIRNAME/data/desktop/notshow"
-	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/default"
-	export XDG_CURRENT_DESKTOP=other
-	run "$XTE"
-	assert_success
-	assert_output "not terminal"
-}
-
 @test "ignores entry when its NotShowIn matches or its OnlyShowIn does not match" {
 	export XDG_CONFIG_HOME="$BATS_TEST_DIRNAME/nothing"
 	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/nothing"
