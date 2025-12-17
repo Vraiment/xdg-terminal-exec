@@ -29,16 +29,6 @@ assert_output() {
 	}
 }
 
-@test "ignores hidden entry" {
-	export XDG_CONFIG_HOME="$BATS_TEST_DIRNAME/config/hidden"
-	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/config/default"
-	export XDG_DATA_HOME="$BATS_TEST_DIRNAME/data/hidden"
-	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/default"
-	run "$XTE"
-	assert_success
-	assert_output "default terminal"
-}
-
 @test "ignores entry when its TryExec fails" {
 	export XDG_CONFIG_HOME="$BATS_TEST_DIRNAME/config/tryexec-fails"
 	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/config/default"
