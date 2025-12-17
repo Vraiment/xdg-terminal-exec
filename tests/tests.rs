@@ -516,3 +516,38 @@ fn ignores_entry_when_its_notshowin_matches_or_its_onlyshowin_does_not_match(com
         .success()
         .stdout("generic terminal\n");
 }
+
+#[test]
+fn quotes_commands_and_arguments_correctly_with_bash() {
+    quotes_commands_and_arguments_correctly(&shell_script_path());
+}
+
+#[test]
+#[ignore]
+fn quotes_commands_and_arguments_correctly_with_rust() {
+    quotes_commands_and_arguments_correctly(&executable_path());
+}
+
+fn quotes_commands_and_arguments_correctly(command_path: &Path) {
+    let expected_stdout = r#"|||quoting terminal|||
+|||with 'complex' arguments,|||
+|||quotes ",|||
+||||||
+|||empty args,|||
+|||new
+lines,|||
+|||and "back\slashes"|||
+|||-e|||
+|||and|||
+|||custom arguments|||
+|||with
+newline|||
+"#;
+
+    build_command(command_path)
+        .env("XDG_DATA_HOME", tests_dir().join("data").join("quoting"))
+        .args(vec!["and", "custom arguments", "with\nnewline"])
+        .assert()
+        .success()
+        .stdout(expected_stdout);
+}

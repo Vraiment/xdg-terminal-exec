@@ -29,28 +29,6 @@ assert_output() {
 	}
 }
 
-@test "quotes commands and arguments correctly" {
-	export XDG_DATA_HOME="$BATS_TEST_DIRNAME/data/quoting"
-	run "$XTE" and 'custom arguments' 'with
-newline'
-	assert_success
-	assert_output <<-'EOF'
-		|||quoting terminal|||
-		|||with 'complex' arguments,|||
-		|||quotes ",|||
-		||||||
-		|||empty args,|||
-		|||new
-		lines,|||
-		|||and "back\slashes"|||
-		|||-e|||
-		|||and|||
-		|||custom arguments|||
-		|||with
-		newline|||
-	EOF
-}
-
 @test "uses globally configured entry with custom action" {
 	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/config/custom-action"
 	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/default"
