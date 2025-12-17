@@ -619,3 +619,41 @@ fn ignores_comments_blank_lines_and_trailing_whitespace(command_path: &Path) {
         .success()
         .stdout("default terminal\n");
 }
+
+#[test]
+fn output_of_print_options_with_bash() {
+    output_of_print_options(&shell_script_path());
+}
+
+#[test]
+#[ignore]
+fn output_of_print_options_with_rust() {
+    output_of_print_options(&executable_path());
+}
+
+fn output_of_print_options(command_path: &Path) {
+    let xdg_data_home = tests_dir().join("data").join("preferred");
+    let expected_stdout = format!(
+        r#"preferred-term.desktop
+
+{}/applications/preferred-term.desktop
+
+echo;;preferred;;terminal;;-e;;and;;custom arguments;;with
+newline"#,
+        xdg_data_home.as_os_str().to_str().unwrap()
+    );
+    build_command(command_path)
+        .env("XDG_DATA_HOME", xdg_data_home)
+        .args(vec![
+            "--print-cmd=;;",
+            "--print-path",
+            "--print-id",
+            r#"--print-delimiter=\n\n"#,
+            "and",
+            "custom arguments",
+            "with\nnewline",
+        ])
+        .assert()
+        .success()
+        .stdout(expected_stdout);
+}
