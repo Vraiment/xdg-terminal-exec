@@ -374,3 +374,35 @@ fn ignores_entry_when_its_tryexec_fails(command_path: &Path) {
         .success()
         .stdout("default terminal\n");
 }
+
+#[test]
+fn uses_desktop_specific_configuration_when_available_with_bash() {
+    uses_desktop_specific_configuration_when_available(&shell_script_path());
+}
+
+#[test]
+#[ignore]
+fn uses_desktop_specific_configuration_when_available_with_rust() {
+    uses_desktop_specific_configuration_when_available(&executable_path());
+}
+
+fn uses_desktop_specific_configuration_when_available(command_path: &Path) {
+    build_command(command_path)
+        .env(
+            "XDG_CONFIG_HOME",
+            tests_dir().join("config").join("desktop").join("lists"),
+        )
+        .env(
+            "XDG_CONFIG_DIRS",
+            tests_dir().join("config").join("default"),
+        )
+        .env(
+            "XDG_DATA_HOME",
+            tests_dir().join("data").join("desktop").join("lists"),
+        )
+        .env("XDG_DATA_DIRS", tests_dir().join("data").join("default"))
+        .env("XDG_CURRENT_DESKTOP", "desktop")
+        .assert()
+        .success()
+        .stdout("specific terminal\n");
+}
