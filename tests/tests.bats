@@ -29,13 +29,6 @@ assert_output() {
 	}
 }
 
-@test "fails on globally configured entry with missing action" {
-	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/config/missing-action"
-	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/default"
-	run "$XTE"
-	assert_failure
-}
-
 @test "ignores comments, blank lines, and trailing whitespace" {
 	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/config/whitespace"
 	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/default"

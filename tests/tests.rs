@@ -574,3 +574,25 @@ fn uses_globally_configured_entry_with_custom_action(command_path: &Path) {
         .success()
         .stdout("default terminal - custom action\n");
 }
+
+#[test]
+fn fails_on_globally_configured_entry_with_missing_action_with_bash() {
+    fails_on_globally_configured_entry_with_missing_action(&shell_script_path());
+}
+
+#[test]
+#[ignore]
+fn fails_on_globally_configured_entry_with_missing_action_with_rust() {
+    fails_on_globally_configured_entry_with_missing_action(&executable_path());
+}
+
+fn fails_on_globally_configured_entry_with_missing_action(command_path: &Path) {
+    build_command(command_path)
+        .env(
+            "XDG_CONFIG_DIRS",
+            tests_dir().join("config").join("missing-action"),
+        )
+        .env("XDG_DATA_DIRS", tests_dir().join("data").join("default"))
+        .assert()
+        .failure();
+}
