@@ -178,3 +178,23 @@ fn uses_configured_exec_arg(command_path: &Path) {
         .success()
         .stdout("TerminalArgExec terminal -- argument\n");
 }
+
+#[test]
+fn adds_default_exec_arg_with_bash() {
+    adds_default_exec_arg(&shell_script_path());
+}
+
+#[test]
+#[ignore]
+fn adds_default_exec_arg_with_rust() {
+    adds_default_exec_arg(&executable_path());
+}
+
+fn adds_default_exec_arg(command_path: &Path) {
+    build_command(command_path)
+        .env("XDG_DATA_DIRS", tests_dir().join("data").join("default"))
+        .arg("argument")
+        .assert()
+        .success()
+        .stdout("default terminal -e argument\n");
+}

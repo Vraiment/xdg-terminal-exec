@@ -29,13 +29,6 @@ assert_output() {
 	}
 }
 
-@test "adds default exec arg" {
-	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/default"
-	run "$XTE" argument
-	assert_success
-	assert_output "default terminal -e argument"
-}
-
 @test "deals with large desktop entries" {
 	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/huge"
 	run "$XTE"
