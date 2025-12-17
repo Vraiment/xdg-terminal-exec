@@ -1,4 +1,5 @@
 use std::{
+    ffi::{OsStr, OsString},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -20,11 +21,6 @@ fn tests_dir() -> PathBuf {
 fn build_command(command_path: &Path) -> Command {
     let mut command = Command::new(command_path);
     let test_nothing_dir = tests_dir().join("nothing");
-    let test_bin_dir = tests_dir()
-        .join("bin")
-        .into_os_string()
-        .into_string()
-        .expect("Failed to get tests/bin directory");
 
     command
         .env_remove("XDG_CURRENT_DESKTOP")
@@ -32,9 +28,39 @@ fn build_command(command_path: &Path) -> Command {
         .env("XDG_CONFIG_DIRS", test_nothing_dir.clone())
         .env("XDG_DATA_HOME", test_nothing_dir.clone())
         .env("XDG_DATA_DIRS", test_nothing_dir.clone())
-        .env("PATH", format!("{}:{}", test_bin_dir, env!("PATH")));
+        .env(
+            "PATH",
+            join_os_strs_to_env_var_list(&[
+                tests_dir().join("bin").as_os_str(),
+                &OsString::from(env!("PATH")),
+            ]),
+        );
 
     command
+}
+
+/// Joins a slice of `&OsStr` into a `OsString` using `:` as the separator
+fn join_os_strs_to_env_var_list(os_strs: &[&OsStr]) -> OsString {
+    use std::os::unix::ffi::OsStringExt;
+
+    match os_strs.len() {
+        0 => OsString::from(String::new()),
+        1 => OsString::from(os_strs.first().unwrap()),
+        _ => {
+            let strings_size: usize = os_strs.iter().map(|os_str| os_str.len()).sum();
+            let mut buffer: Vec<u8> = Vec::with_capacity(strings_size + os_strs.len() - 1);
+
+            buffer.extend(OsString::from(os_strs.first().unwrap()).into_vec());
+
+            let separator = OsString::from(String::from(':')).into_vec();
+            for os_str in os_strs[1..].iter() {
+                buffer.extend(separator.clone());
+                buffer.extend(OsString::from(os_str).into_vec());
+            }
+
+            OsString::from_vec(buffer)
+        }
+    }
 }
 
 #[test]
@@ -72,12 +98,10 @@ fn ignores_missing_config_directory_with_rust() {
 }
 
 fn ignores_missing_config_directory(command_path: &Path) {
-    let xdg_config_dirs = [
-        tests_dir().join("missing"),
-        tests_dir().join("config").join("default"),
-    ]
-    .map(|path| path.into_os_string().into_string().unwrap())
-    .join(":");
+    let xdg_config_dirs = join_os_strs_to_env_var_list(&[
+        tests_dir().join("missing").as_os_str(),
+        tests_dir().join("config").join("default").as_os_str(),
+    ]);
 
     build_command(command_path)
         .env("XDG_CONFIG_DIRS", xdg_config_dirs)
@@ -99,12 +123,10 @@ fn ignores_missing_data_directory_with_rust() {
 }
 
 fn ignores_missing_data_directory(command_path: &Path) {
-    let xdg_data_dirs = [
-        tests_dir().join("missing"),
-        tests_dir().join("data").join("default"),
-    ]
-    .map(|path| path.into_os_string().into_string().unwrap())
-    .join(":");
+    let xdg_data_dirs = join_os_strs_to_env_var_list(&[
+        tests_dir().join("missing").as_os_str(),
+        tests_dir().join("data").join("default").as_os_str(),
+    ]);
 
     build_command(command_path)
         .env(
