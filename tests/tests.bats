@@ -29,13 +29,6 @@ assert_output() {
 	}
 }
 
-@test "finds any local entry when there is no configuration" {
-	export XDG_DATA_HOME="$BATS_TEST_DIRNAME/data/default"
-	run "$XTE"
-	assert_success
-	assert_output "default terminal"
-}
-
 @test "prefers earlier configured entry" {
 	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/config/preferred:$BATS_TEST_DIRNAME/config/default"
 	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/preferred:$BATS_TEST_DIRNAME/data/default"

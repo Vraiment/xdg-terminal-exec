@@ -217,3 +217,22 @@ fn deals_with_large_desktop_entries(command_path: &Path) {
         .success()
         .stdout("huge terminal\n");
 }
+
+#[test]
+fn finds_any_local_entry_when_there_is_no_configuration_with_bash() {
+    finds_any_local_entry_when_there_is_no_configuration(&shell_script_path());
+}
+
+#[test]
+#[ignore]
+fn finds_any_local_entry_when_there_is_no_configuration_with_rust() {
+    finds_any_local_entry_when_there_is_no_configuration(&executable_path());
+}
+
+fn finds_any_local_entry_when_there_is_no_configuration(command_path: &Path) {
+    build_command(command_path)
+        .env("XDG_DATA_HOME", tests_dir().join("data").join("default"))
+        .assert()
+        .success()
+        .stdout("default terminal\n");
+}
