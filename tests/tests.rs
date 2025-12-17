@@ -551,3 +551,26 @@ newline|||
         .success()
         .stdout(expected_stdout);
 }
+
+#[test]
+fn uses_globally_configured_entry_with_custom_action_with_bash() {
+    uses_globally_configured_entry_with_custom_action(&shell_script_path());
+}
+
+#[test]
+#[ignore]
+fn uses_globally_configured_entry_with_custom_action_with_rust() {
+    uses_globally_configured_entry_with_custom_action(&executable_path());
+}
+
+fn uses_globally_configured_entry_with_custom_action(command_path: &Path) {
+    build_command(command_path)
+        .env(
+            "XDG_CONFIG_DIRS",
+            tests_dir().join("config").join("custom-action"),
+        )
+        .env("XDG_DATA_DIRS", tests_dir().join("data").join("default"))
+        .assert()
+        .success()
+        .stdout("default terminal - custom action\n");
+}

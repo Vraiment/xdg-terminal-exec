@@ -29,14 +29,6 @@ assert_output() {
 	}
 }
 
-@test "uses globally configured entry with custom action" {
-	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/config/custom-action"
-	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/default"
-	run "$XTE"
-	assert_success
-	assert_output "default terminal - custom action"
-}
-
 @test "fails on globally configured entry with missing action" {
 	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/config/missing-action"
 	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/default"
