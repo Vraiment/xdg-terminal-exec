@@ -438,3 +438,29 @@ fn uses_desktop_agnostic_configuration_when_none_is_available(command_path: &Pat
         .success()
         .stdout("generic terminal\n");
 }
+
+#[test]
+fn considers_entry_when_its_onlyshowin_matches_with_bash() {
+    considers_entry_when_its_onlyshowin_matches(&shell_script_path());
+}
+
+#[test]
+#[ignore]
+fn considers_entry_when_its_onlyshowin_matches_with_rust() {
+    considers_entry_when_its_onlyshowin_matches(&executable_path());
+}
+
+fn considers_entry_when_its_onlyshowin_matches(command_path: &Path) {
+    build_command(command_path)
+        .env("XDG_CONFIG_HOME", tests_dir().join("nothing"))
+        .env("XDG_CONFIG_DIRS", tests_dir().join("nothing"))
+        .env(
+            "XDG_DATA_HOME",
+            tests_dir().join("data").join("desktop").join("onlyshow"),
+        )
+        .env("XDG_DATA_DIRS", tests_dir().join("data").join("default"))
+        .env("XDG_CURRENT_DESKTOP", "only:not")
+        .assert()
+        .success()
+        .stdout("only terminal\n");
+}
