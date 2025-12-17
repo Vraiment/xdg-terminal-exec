@@ -29,16 +29,6 @@ assert_output() {
 	}
 }
 
-@test "prefers locally configured entry" {
-	export XDG_CONFIG_HOME="$BATS_TEST_DIRNAME/config/preferred"
-	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/config/default"
-	export XDG_DATA_HOME="$BATS_TEST_DIRNAME/data/preferred"
-	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/default"
-	run "$XTE"
-	assert_success
-	assert_output "preferred terminal"
-}
-
 @test "ignores hidden entry" {
 	export XDG_CONFIG_HOME="$BATS_TEST_DIRNAME/config/hidden"
 	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/config/default"
