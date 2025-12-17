@@ -490,3 +490,29 @@ fn considers_entry_when_its_notshowin_does_not_match(command_path: &Path) {
         .success()
         .stdout("not terminal\n");
 }
+
+#[test]
+fn ignores_entry_when_its_notshowin_matches_or_its_onlyshowin_does_not_match_with_bash() {
+    ignores_entry_when_its_notshowin_matches_or_its_onlyshowin_does_not_match(&shell_script_path());
+}
+
+#[test]
+#[ignore]
+fn ignores_entry_when_its_notshowin_matches_or_its_onlyshowin_does_not_match_with_rust() {
+    ignores_entry_when_its_notshowin_matches_or_its_onlyshowin_does_not_match(&executable_path());
+}
+
+fn ignores_entry_when_its_notshowin_matches_or_its_onlyshowin_does_not_match(command_path: &Path) {
+    build_command(command_path)
+        .env("XDG_CONFIG_HOME", tests_dir().join("nothing"))
+        .env("XDG_CONFIG_DIRS", tests_dir().join("nothing"))
+        .env(
+            "XDG_DATA_HOME",
+            tests_dir().join("data").join("desktop").join("show"),
+        )
+        .env("XDG_DATA_DIRS", tests_dir().join("data").join("default"))
+        .env("XDG_CURRENT_DESKTOP", "not")
+        .assert()
+        .success()
+        .stdout("generic terminal\n");
+}
