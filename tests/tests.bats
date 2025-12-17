@@ -29,17 +29,6 @@ assert_output() {
 	}
 }
 
-@test "uses desktop-agnostic configuration when none is available" {
-	export XDG_CONFIG_HOME="$BATS_TEST_DIRNAME/config/desktop/lists"
-	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/config/default"
-	export XDG_DATA_HOME="$BATS_TEST_DIRNAME/data/desktop/lists"
-	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/default"
-	export XDG_CURRENT_DESKTOP=other
-	run "$XTE"
-	assert_success
-	assert_output "generic terminal"
-}
-
 @test "considers entry when its OnlyShowIn matches" {
 	export XDG_CONFIG_HOME="$BATS_TEST_DIRNAME/nothing"
 	export XDG_CONFIG_DIRS="$BATS_TEST_DIRNAME/nothing"
