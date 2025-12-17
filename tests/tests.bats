@@ -29,13 +29,6 @@ assert_output() {
 	}
 }
 
-@test "uses configured exec arg" {
-	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/execarg"
-	run "$XTE" argument
-	assert_success
-	assert_output "TerminalArgExec terminal -- argument"
-}
-
 @test "adds default exec arg" {
 	export XDG_DATA_DIRS="$BATS_TEST_DIRNAME/data/default"
 	run "$XTE" argument

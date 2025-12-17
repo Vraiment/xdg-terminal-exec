@@ -158,3 +158,23 @@ fn finds_any_global_entry_when_there_is_no_configuration(command_path: &Path) {
         .success()
         .stdout("default terminal\n");
 }
+
+#[test]
+fn uses_configured_exec_arg_with_bash() {
+    uses_configured_exec_arg(&shell_script_path());
+}
+
+#[test]
+#[ignore]
+fn uses_configured_exec_arg_with_rust() {
+    uses_configured_exec_arg(&executable_path());
+}
+
+fn uses_configured_exec_arg(command_path: &Path) {
+    build_command(command_path)
+        .env("XDG_DATA_DIRS", tests_dir().join("data").join("execarg"))
+        .arg("argument")
+        .assert()
+        .success()
+        .stdout("TerminalArgExec terminal -- argument\n");
+}
