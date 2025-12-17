@@ -343,3 +343,34 @@ fn ignores_hidden_entry(command_path: &Path) {
         .success()
         .stdout("default terminal\n");
 }
+
+#[test]
+fn ignores_entry_when_its_tryexec_fails_with_bash() {
+    ignores_entry_when_its_tryexec_fails(&shell_script_path());
+}
+
+#[test]
+#[ignore]
+fn ignores_entry_when_its_tryexec_fails_with_rust() {
+    ignores_entry_when_its_tryexec_fails(&executable_path());
+}
+
+fn ignores_entry_when_its_tryexec_fails(command_path: &Path) {
+    build_command(command_path)
+        .env(
+            "XDG_CONFIG_HOME",
+            tests_dir().join("config").join("tryexec-fails"),
+        )
+        .env(
+            "XDG_CONFIG_DIRS",
+            tests_dir().join("config").join("default"),
+        )
+        .env(
+            "XDG_DATA_HOME",
+            tests_dir().join("data").join("tryexec-fails"),
+        )
+        .env("XDG_DATA_DIRS", tests_dir().join("data").join("default"))
+        .assert()
+        .success()
+        .stdout("default terminal\n");
+}
