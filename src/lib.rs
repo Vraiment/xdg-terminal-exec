@@ -34,6 +34,62 @@ pub fn check_bool(value: &str) -> bool {
     }
 }
 
+/// Emplaces `value` into the "*colon separate value*" list `list`.
+///
+/// The original implementation of `xdg-terminal-exec` is written in bash and
+/// relies heavily on variables using `:` as the record separator. This function
+/// is a straighforward *emplace* implementation for this concept: if the list is
+/// empty then the value gets added, if is not empty the value gets added
+/// suffixed by `:`.
+///
+///
+/// ```
+/// use xdg_terminal_exec::emplace_to_csv_list;
+///
+/// let mut list = String::new();
+///
+/// emplace_to_csv_list(&mut list, "value1");
+/// assert_eq!(list, "value1");
+///
+/// emplace_to_csv_list(&mut list, "value2");
+/// assert_eq!(list, "value2:value1");
+/// ```
+pub fn emplace_to_csv_list(list: &mut String, value: &str) {
+    if !list.is_empty() {
+        list.insert(0, ':');
+    }
+
+    list.insert_str(0, value);
+}
+
+/// Pushes `value` into the "*colon separate value*" list `list`.
+///
+/// The original implementation of `xdg-terminal-exec` is written in bash and
+/// relies heavily on variables using `:` as the record separator. This function
+/// is a straighforward *push* implementation for this concept: if the list is
+/// empty then the value gets added, if is not empty the value gets added
+/// prefixed by `:`.
+///
+///
+/// ```
+/// use xdg_terminal_exec::push_to_csv_list;
+///
+/// let mut list = String::new();
+///
+/// push_to_csv_list(&mut list, "value1");
+/// assert_eq!(list, "value1");
+///
+/// push_to_csv_list(&mut list, "value2");
+/// assert_eq!(list, "value1:value2");
+/// ```
+pub fn push_to_csv_list(list: &mut String, value: &str) {
+    if !list.is_empty() {
+        list.push(':');
+    }
+
+    list.push_str(value);
+}
+
 #[cfg(test)]
 mod test {
     use crate::*;
@@ -65,5 +121,41 @@ mod test {
         } else {
             Err(String::from("check_bool(any_value) should return false"))
         }
+    }
+
+    #[test]
+    fn test_emplace_to_empty_csv_list() {
+        let mut list = String::new();
+
+        emplace_to_csv_list(&mut list, "value");
+
+        assert_eq!(list, "value");
+    }
+
+    #[test]
+    fn test_emplace_to_non_empty_csv_list() {
+        let mut list = String::from("existing");
+
+        emplace_to_csv_list(&mut list, "value");
+
+        assert_eq!(list, "value:existing");
+    }
+
+    #[test]
+    fn test_push_to_empty_csv_list() {
+        let mut list = String::new();
+
+        push_to_csv_list(&mut list, "value");
+
+        assert_eq!(list, "value");
+    }
+
+    #[test]
+    fn test_push_to_non_empty_csv_list() {
+        let mut list = String::from("existing");
+
+        push_to_csv_list(&mut list, "value");
+
+        assert_eq!(list, "existing:value");
     }
 }
