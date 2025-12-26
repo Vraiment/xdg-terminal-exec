@@ -153,7 +153,7 @@ fn make_paths(debugger: &Box<dyn Debugger>, xte: &mut Globals) -> Result<(), Var
         .or_else(|_| env::var("HOME").map(|value| format!("{value}/.cache")))?;
     xte.cache_file = format!("{}/xdg-terminal-exec", xte.xdg_cache_home);
 
-    debugger.print(&[
+    debugger.print_slice(&[
         &"paths:",
         &format!("  XTE__CONFIGS={}", xte.configs),
         &format!("  XTE__APPLICATIONS_DIRS={}", xte.applications_dirs),

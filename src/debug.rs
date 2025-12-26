@@ -10,7 +10,7 @@
 //! let debugger = build_debugger();
 //!
 //! println!("Debugger is enabled: {}", debugger.is_enabled());
-//! debugger.print(&[&"value1", &"value2"]);
+//! debugger.print_slice(&[&"value1", &"value2"]);
 //! ```
 use std::{env, fmt::Display};
 
@@ -20,16 +20,43 @@ use crate::*;
 ///
 /// To create a new instance use [`build_debugger()`].
 pub trait Debugger {
-    /// Prints the given slice of [`Display`] objects to the debugging output.
+    /// Prints the given [`Display`] object to the debugging output.
     ///
     /// ```
     /// use xdg_terminal_exec::debug::build_debugger;
     ///
     /// let debugger = build_debugger();
     ///
-    /// debugger.print(&[&"value1", &"value2"]);
+    /// debugger.print_line(&"my value");
     /// ```
-    fn print(&self, args: &[&dyn Display]);
+    fn print_line(&self, arg: &dyn Display);
+
+    /// Prints the given slice of [`Display`] objects to the debugging output.
+    ///
+    /// Each individual entry is considered a line.
+    ///
+    /// ```
+    /// use xdg_terminal_exec::debug::build_debugger;
+    ///
+    /// let debugger = build_debugger();
+    ///
+    /// debugger.print_slice(&[&"value1", &"value2"]);
+    /// ```
+    fn print_slice(&self, slice: &[&dyn Display]);
+
+    /// Prints the given [`Vec`] of [`Display`] objects to the debugging output.
+    ///
+    /// Each individual entry is considered a line.
+    ///
+    /// ```
+    /// use xdg_terminal_exec::debug::build_debugger;
+    ///
+    /// let debugger = build_debugger();
+    ///
+    /// let values: Vec<&dyn std::fmt::Display> = vec![&"value1", &"value2"];
+    /// debugger.print_vec(&values);
+    /// ```
+    fn print_vec(&self, vec: &Vec<&dyn Display>);
 
     /// Returns whether the debugger is enabled (prints anything to anywhere) or
     /// not.
@@ -64,7 +91,11 @@ struct NoOpDebugger;
 struct StdErrDebugger;
 
 impl Debugger for NoOpDebugger {
-    fn print(&self, _args: &[&dyn Display]) {}
+    fn print_line(&self, _arg: &dyn Display) {}
+
+    fn print_slice(&self, _slice: &[&dyn Display]) {}
+
+    fn print_vec(&self, _vec: &Vec<&dyn Display>) {}
 
     fn is_enabled(&self) -> bool {
         false
@@ -72,9 +103,19 @@ impl Debugger for NoOpDebugger {
 }
 
 impl Debugger for StdErrDebugger {
-    fn print(&self, args: &[&dyn Display]) {
-        for &arg in args {
-            eprintln!("D: {}", arg);
+    fn print_line(&self, arg: &dyn Display) {
+        eprintln!("D: {}", arg);
+    }
+
+    fn print_slice(&self, slice: &[&dyn Display]) {
+        for &entry in slice {
+            self.print_line(entry);
+        }
+    }
+
+    fn print_vec(&self, vec: &Vec<&dyn Display>) {
+        for &entry in vec {
+            self.print_line(entry);
         }
     }
 
