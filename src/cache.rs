@@ -2,10 +2,16 @@
 //!
 //! This module contains functions related to caching. Details about how the
 //! cache works will be provided later.
+//!
+//! It has an ungodly implementation, namely the `gen_hash` function that calls
+//! /bin/sh directly, this is to maintain backwards compatibility with the
+//! original /bin/sh implementation. It should be replaced with a native Rust
+//! implementation in the future.
 
 use std::{
     collections::HashMap,
     ffi::OsStr,
+    fmt::Display,
     io::{self, Write},
     process::{Child, Command, Stdio},
 };
@@ -100,6 +106,56 @@ fn execute_sh_script(
     script: &str,
 ) -> Result<Vec<u8>, ScriptExecutionError> {
     execute_sh_script_with_env(debugger, &HashMap::<&OsStr, Option<&OsStr>>::new(), script)
+}
+
+fn gen_hash<T>(
+    debugger: &Box<dyn Debugger>,
+    xdg_current_desktop: T,
+    xte_configs: T,
+    xte_applications_dirs: T,
+) -> Result<String, ScriptExecutionError>
+where
+    T: AsRef<OsStr>,
+{
+    if debugger.is_enabled() {
+        let mut message = vec![format!(
+            ">     hashing '{}' and listing of:",
+            xdg_current_desktop.as_ref().display()
+        )];
+        format!(
+            "{}:{}",
+            xte_configs.as_ref().display(),
+            xte_applications_dirs.as_ref().display()
+        )
+        .split(':')
+        .for_each(|path| message.push(path.to_owned()));
+        message.push("^     end of hash listing".to_owned());
+
+        debugger.print_vec(&message.iter().map(|line| line as &dyn Display).collect());
+    }
+
+    // Use a script to try to keep the hashing algorithm as close as possible
+    // to the original bash implementation
+    let script = r#"set -eufx
+    xte__hash_paths=${XTE__CONFIGS}:${XTE__APPLICATIONS_DIRS}
+    echo 4
+    echo "${XDG_CURRENT_DESKTOP-}"
+    IFS=':'
+    LANG=C ls -LRl ${xte__hash_paths} 2> /dev/null"#;
+    // return md5 of custom string, XDG_CURRENT_DESKTOP and ls -LRl output for config and data paths
+    // md5 is 4x faster than sha*, and there is no need for cryptography here
+    let digest = execute_sh_script_with_env(
+        debugger,
+        &HashMap::from([
+            ("XDG_CURRENT_DESKTOP", Some(xdg_current_desktop)),
+            ("XTE__CONFIGS", Some(xte_configs)),
+            ("XTE__APPLICATIONS_DIRS", Some(xte_applications_dirs)),
+        ]),
+        script,
+    )
+    .map(md5::compute)?;
+
+    Ok(format!("{:x}", digest))
 }
 
 #[cfg(test)]
@@ -242,5 +298,97 @@ mod test {
                 ),
             },
         };
+    }
+
+    // This test is ignored because it needs to be manually setup on each
+    // machine and even between reboots to ensure the results are valid as the
+    // values used for the hash take into account creation time and user name.
+    //
+    // Execute the following script to generate a Rust snippet that can be
+    // used in this test.
+    //
+    // ```shell
+    // SCRATCH_DIR="$(mktemp --directory)"
+    //
+    // mkdir --parents \
+    //     "$SCRATCH_DIR"/configs/a \
+    //     "$SCRATCH_DIR"/configs/b \
+    //     "$SCRATCH_DIR"/configs/c \
+    //     "$SCRATCH_DIR"/config_symlink_target
+    //
+    // ln --symbolic "$SCRATCH_DIR"/config_symlink_target "$SCRATCH_DIR"/configs/symlink
+    //
+    // touch \
+    //     "$SCRATCH_DIR"/configs/a/config \
+    //     "$SCRATCH_DIR"/configs/b/config \
+    //     "$SCRATCH_DIR"/configs/c/config \
+    //     "$SCRATCH_DIR"/config_symlink_target/config
+    //
+    // mkdir --parents \
+    //     "$SCRATCH_DIR"/applications/a \
+    //     "$SCRATCH_DIR"/applications/b \
+    //     "$SCRATCH_DIR"/applications/c \
+    //     "$SCRATCH_DIR"/applications_symlink_target
+    //
+    // touch \
+    //     "$SCRATCH_DIR"/applications/a/config \
+    //     "$SCRATCH_DIR"/applications/b/config \
+    //     "$SCRATCH_DIR"/applications/c/config \
+    //     "$SCRATCH_DIR"/applications_symlink_target/config
+    //
+    // ln --symbolic "$SCRATCH_DIR"/applications_symlink_target "$SCRATCH_DIR"/applications/symlink
+    //
+    // XDG_CURRENT_DESKTOP=de
+    // XTE__CONFIGS="$SCRATCH_DIR"/configs/a:"$SCRATCH_DIR"/configs/b:"$SCRATCH_DIR"/configs/c:"$SCRATCH_DIR"/configs/symlink
+    // XTE__APPLICATIONS_DIRS="$SCRATCH_DIR"/applications/a:"$SCRATCH_DIR"/applications/b:"$SCRATCH_DIR"/applications/c:"$SCRATCH_DIR"/applications/symlink
+    //
+    // function gen_hash() {
+    //     # return md5 of custom string, XDG_CURRENT_DESKTOP and ls -LRl output for config and data paths
+    //     # md5 is 4x faster than sha*, and there is no need for cryptography here
+    //     # writes to XTE__NEW_HASH var
+    //     # shellcheck disable=SC2034
+    //     read -r xte__hash _drop <<- EOH
+    //         $(
+    //             xte__hash_paths=${XTE__CONFIGS}:${XTE__APPLICATIONS_DIRS}
+    //             {
+    //                 # cache 'version', change to invalidate when format changes
+    //                 echo 4
+    //                 echo "${XDG_CURRENT_DESKTOP-}"
+    //                 IFS=':'
+    //                 LANG=C ls -LRl ${xte__hash_paths} 2> /dev/null
+    //             } | md5sum 2> /dev/null
+    //         )
+    //     EOH
+    //
+    //     echo "$xte__hash"
+    // }
+    //
+    // cat << EOF
+    // // DO NOT COMMIT THESE CHANGES
+    // let xdg_current_desktop = "$XDG_CURRENT_DESKTOP";
+    // let xte_configs = "$XTE__CONFIGS";
+    // let xte_applications_dirs = "$XTE__APPLICATIONS_DIRS";
+    // let expected_hash = "$xte__hash";
+    // EOF
+    // ```
+    #[test]
+    #[ignore]
+    fn test_gen_hash() {
+        let debugger = TestingDebugger::default();
+        // Replace the lines below with the values generated by the script
+        let xdg_current_desktop = "";
+        let xte_configs = "";
+        let xte_applications_dirs = "";
+        let expected_hash = "";
+
+        let result = gen_hash(
+            &(Box::new(debugger) as Box<dyn Debugger>),
+            xdg_current_desktop,
+            &xte_configs,
+            &xte_applications_dirs,
+        )
+        .unwrap();
+
+        assert_eq!(result, expected_hash);
     }
 }
