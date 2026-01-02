@@ -12,7 +12,7 @@
 //! println!("Debugger is enabled: {}", debugger.is_enabled());
 //! debugger.print_slice(&[&"value1", &"value2"]);
 //! ```
-use std::{env, fmt::Display};
+use std::fmt::Display;
 
 use crate::*;
 
@@ -74,8 +74,8 @@ pub trait Debugger {
 /// environment variable `XTE_DEBUG` is not set, then the value of the
 /// environment variable `DEBUG` is used with the same logic.
 pub fn build_debugger() -> Box<dyn Debugger> {
-    let enabled = env::var("XTE_DEBUG")
-        .or(env::var("DEBUG"))
+    let enabled = env_var("XTE_DEBUG")
+        .or(env_var("DEBUG"))
         .map(|value| check_bool(&value))
         .unwrap_or(false);
 

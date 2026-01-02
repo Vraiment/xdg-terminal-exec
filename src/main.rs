@@ -1,45 +1,53 @@
 use std::{
-    env::{self, VarError},
+    env,
+    ffi::{OsStr, OsString},
     path::Path,
     process::exit,
 };
 
 use xdg_terminal_exec::{
     debug::{Debugger, build_debugger},
-    emplace_to_csv_list, push_to_csv_list,
+    emplace_to_csv_list, env_var, os_str_concat, os_str_remove_trailing_slash, os_str_split,
+    push_to_csv_list,
 };
+
+#[derive(Debug)]
+enum Error {
+    #[allow(dead_code)]
+    UndefinedEnvVarError(OsString),
+}
 
 #[derive(Default)]
 struct Globals {
-    lowercase_xdg_current_desktop: String,
+    lowercase_xdg_current_desktop: OsString,
     //compat mode
-    execarg_compat: String,
+    execarg_compat: OsString,
     // flag reused in directive encounter
-    execarg_compat_configured: String,
-    exec_usep: String,
-    expanded_str: String,
-    entry_path: String,
-    entry_action: String,
+    execarg_compat_configured: OsString,
+    exec_usep: OsString,
+    expanded_str: OsString,
+    entry_path: OsString,
+    entry_action: OsString,
     // this will receive proper value later
-    applications_dirs: String,
+    applications_dirs: OsString,
     // this will be filled with values from /execarg_default:*:* directives
-    execarg_defaults: String,
+    execarg_defaults: OsString,
     // the following values are updated by reset_keys on the original implementation
     // Init vars used in entry checks
-    is_terminal: String,
-    // exec_usep: String, // duplicated
-    execarg: String,
-    execarg_defined: String,
-    appidarg: String,
-    titlearg: String,
-    dirarg: String,
-    holdarg: String,
+    is_terminal: OsString,
+    // exec_usep: OsString, // duplicated
+    execarg: OsString,
+    execarg_defined: OsString,
+    appidarg: OsString,
+    titlearg: OsString,
+    dirarg: OsString,
+    holdarg: OsString,
     // the following values are updated by make_paths on the original implementation
     // Global constants and lists for later use and iterator
-    configs: String,
-    // applications_dirs: String, // duplicated
-    cache_file: String,
-    xdg_cache_home: String,
+    configs: OsString,
+    // applications_dirs: OsString, // duplicated
+    cache_file: OsString,
+    xdg_cache_home: OsString,
 }
 
 fn main() {
@@ -55,11 +63,11 @@ fn main() {
     }
 
     let mut xte = Globals::default();
-    xte.lowercase_xdg_current_desktop = env::var("XDG_CURRENT_DESKTOP")
+    xte.lowercase_xdg_current_desktop = env_var("XDG_CURRENT_DESKTOP")
         .unwrap_or_default()
-        .to_lowercase();
-    xte.execarg_compat = env::var("XTE_EXECARG_COMPAT").unwrap_or(String::from("true"));
-    xte.execarg_compat_configured = env::var("XTE_EXECARG_COMPAT").unwrap_or_default();
+        .to_ascii_lowercase();
+    xte.execarg_compat = env_var("XTE_EXECARG_COMPAT").unwrap_or(OsString::from("true"));
+    xte.execarg_compat_configured = env_var("XTE_EXECARG_COMPAT").unwrap_or_default();
     reset_keys(&mut xte);
 
     let debugger = build_debugger();
@@ -67,96 +75,133 @@ fn main() {
 }
 
 fn reset_keys(xte: &mut Globals) {
-    xte.is_terminal = String::new();
-    xte.exec_usep = String::new();
-    xte.execarg = String::from("-e");
-    xte.execarg_defined = String::from("false");
-    xte.appidarg = String::new();
-    xte.titlearg = String::new();
-    xte.dirarg = String::new();
-    xte.holdarg = String::new();
+    xte.is_terminal = OsString::new();
+    xte.exec_usep = OsString::new();
+    xte.execarg = OsString::from("-e");
+    xte.execarg_defined = OsString::from("false");
+    xte.appidarg = OsString::new();
+    xte.titlearg = OsString::new();
+    xte.dirarg = OsString::new();
+    xte.holdarg = OsString::new();
 }
 
-fn make_paths(debugger: &Box<dyn Debugger>, xte: &mut Globals) -> Result<(), VarError> {
+fn make_paths(debugger: &Box<dyn Debugger>, xte: &mut Globals) -> Result<(), Error> {
     // Populate list of config files to read, in descending order of preference
-    let config_dirs = format!(
-        "{}:{}",
-        env::var("XDG_CONFIG_HOME")
-            .or_else(|_| env::var("HOME").map(|value| format!("{value}/.config")))?,
-        env::var("XDG_CONFIG_DIRS").unwrap_or(String::from("/etc/xdg"))
-    );
-    for xte_dir in config_dirs.split(':') {
-        // Normalise base path and append the data subdirectory with a trailing '/'
-        let xte_dir = match xte_dir.strip_suffix('/') {
+    // Equivalent to `${XDG_CONFIG_HOME:-"${HOME}/.config"}${IFS}${XDG_CONFIG_DIRS:-/etc/xdg}`
+    let config_dirs = os_str_concat(&[
+        match env_var("XDG_CONFIG_HOME") {
             Some(value) => value,
-            None => xte_dir,
-        };
+            None => match env_var("HOME") {
+                Some(value) => os_str_concat(&[value.as_os_str(), &OsStr::new("/.config")]),
+                None => return Err(Error::UndefinedEnvVarError(OsString::from("HOME"))),
+            },
+        },
+        OsString::from(":"),
+        env_var("XDG_CONFIG_DIRS").unwrap_or(OsString::from("/etc/xdg")),
+    ]);
+    for xte_dir in os_str_split(&config_dirs, ':').unwrap() {
+        // Normalise base path and append the data subdirectory with a trailing '/'
+        let xte_dir = os_str_remove_trailing_slash(&xte_dir);
 
         if !xte.lowercase_xdg_current_desktop.is_empty() {
-            for xte_desktop in xte.lowercase_xdg_current_desktop.split(':') {
-                push_to_csv_list(
-                    &mut xte.configs,
-                    &format!("{xte_dir}/{xte_desktop}-xdg-terminals.list"),
+            for xte_desktop in os_str_split(&xte.lowercase_xdg_current_desktop, ':').unwrap() {
+                xte.configs = push_to_csv_list(
+                    &xte.configs,
+                    // Equivalent to `format!("{xte_dir}/{xte_desktop}-xdg-terminals.list")`
+                    os_str_concat(&[
+                        xte_dir,
+                        OsStr::new("/"),
+                        xte_desktop,
+                        OsStr::new("-xdg-terminals.list"),
+                    ]),
                 );
             }
         }
 
-        push_to_csv_list(&mut xte.configs, &format!("{xte_dir}/xdg-terminals.list"));
+        xte.configs = push_to_csv_list(
+            &xte.configs,
+            // Equivalent to `format!("{xte_dir}/xdg-terminals.list")`
+            os_str_concat(&[xte_dir, OsStr::new("/xdg-terminals.list")]),
+        );
     }
 
     // append xdg-terminal-exec dirs in XDG_DATA_DIRS to config hierarchy for distro/upstream level defaults
-    let xdg_data_dirs =
-        env::var("XDG_DATA_DIRS").unwrap_or(String::from("/usr/local/share:/usr/share"));
-    for xte_dir in xdg_data_dirs.split(':') {
+    // Equivalent to `${XDG_DATA_DIRS:-/usr/local/share:/usr/share}`
+    let xdg_data_dirs = match env_var("XDG_DATA_DIRS") {
+        Some(value) => value,
+        None => OsString::from("/usr/local/share:/usr/share"),
+    };
+    for xte_dir in os_str_split(&xdg_data_dirs, ':').unwrap() {
         // Normalise base path and append the data subdirectory with a trailing '/'
-        let xte_dir = match xte_dir.strip_suffix('/') {
-            Some(value) => value,
-            None => xte_dir,
-        };
+        let xte_dir = os_str_remove_trailing_slash(&xte_dir);
 
         if !xte.lowercase_xdg_current_desktop.is_empty() {
-            for xte_desktop in xte.lowercase_xdg_current_desktop.split(':') {
-                push_to_csv_list(
-                    &mut xte.configs,
-                    &format!("{xte_dir}/xdg-terminal-exec/{xte_desktop}-xdg-terminals.list"),
+            for xte_desktop in os_str_split(&xte.lowercase_xdg_current_desktop, ':').unwrap() {
+                xte.configs = push_to_csv_list(
+                    &xte.configs,
+                    // Equivalent to `format!("{xte_dir}/xdg-terminal-exec/{xte_desktop}-xdg-terminals.list")`
+                    os_str_concat(&[
+                        xte_dir,
+                        OsStr::new("/xdg-terminal-exec/"),
+                        xte_desktop,
+                        OsStr::new("-xdg-terminals.list"),
+                    ]),
                 );
             }
         }
 
-        push_to_csv_list(
-            &mut xte.configs,
-            &format!("{xte_dir}/xdg-terminal-exec/xdg-terminals.list"),
+        xte.configs = push_to_csv_list(
+            &xte.configs,
+            // Equivalent to `format!("{xte_dir}/xdg-terminal-exec/xdg-terminals.list")`
+            os_str_concat(&[xte_dir, OsStr::new("/xdg-terminal-exec/xdg-terminals.list")]),
         );
     }
 
     // Populate list of directories to search for entries in, in ascending order of preference
-    let data_home_dirs = format!(
-        "{}:{}",
-        env::var("XDG_DATA_HOME")
-            .or_else(|_| env::var("HOME").map(|value| format!("{value}/.local/share")))?,
-        env::var("XDG_DATA_DIRS").unwrap_or(String::from("/usr/local/share:/usr/share"))
-    );
-    for xte_dir in data_home_dirs.split(':') {
-        // Normalise base path and append the data subdirectory with a trailing '/'
-        let xte_dir = match xte_dir.strip_suffix('/') {
+    // Equivalent to `${XDG_DATA_HOME:-${HOME}/.local/share}${IFS}${XDG_DATA_DIRS:-/usr/local/share:/usr/share}`
+    let data_home_dirs = os_str_concat(&[
+        match env_var("XDG_DATA_HOME") {
             Some(value) => value,
-            None => xte_dir,
-        };
+            None => match env_var("HOME") {
+                Some(value) => os_str_concat(&[value.as_os_str(), &OsStr::new("/.local/share")]),
+                None => return Err(Error::UndefinedEnvVarError(OsString::from("HOME"))),
+            },
+        },
+        OsString::from(":"),
+        env_var("XDG_DATA_DIRS").unwrap_or(OsString::from("/usr/local/share:/usr/share")),
+    ]);
+    for xte_dir in os_str_split(&data_home_dirs, ':').unwrap() {
+        // Normalise base path and append the data subdirectory with a trailing '/'
+        let xte_dir = os_str_remove_trailing_slash(&xte_dir);
 
-        emplace_to_csv_list(
-            &mut xte.applications_dirs,
-            &format!("{xte_dir}/applications/"),
+        xte.applications_dirs = emplace_to_csv_list(
+            &xte.applications_dirs,
+            // Equivalent to `format!("{xte_dir}/applications/")`,
+            os_str_concat(&[xte_dir, OsStr::new("/applications/")]),
         );
     }
 
-    xte.xdg_cache_home = env::var("XDG_CACHE_HOME")
-        .or_else(|_| env::var("HOME").map(|value| format!("{value}/.cache")))?;
-    xte.cache_file = format!("{}/xdg-terminal-exec", xte.xdg_cache_home);
+    xte.xdg_cache_home = match env_var("XDG_CACHE_HOME") {
+        Some(value) => value,
+        None => match env_var("HOME") {
+            // Equivalent to `format!("{value}/.cache")`
+            Some(value) => os_str_concat(&[value.as_os_str(), OsStr::new("/.cache")]),
+            None => return Err(Error::UndefinedEnvVarError(OsString::from("HOME"))),
+        },
+    };
+    // Equivalent to `format!("{}/xdg-terminal-exec", xte.xdg_cache_home)`
+    xte.cache_file = os_str_concat(&[
+        xte.xdg_cache_home.as_os_str(),
+        OsStr::new("/xdg-terminal-exec"),
+    ]);
 
     debugger.print_slice(&[
         &"paths:",
-        &format!("  XTE__CONFIGS={}", xte.configs),
-        &format!("  XTE__APPLICATIONS_DIRS={}", xte.applications_dirs),
+        &format!("  XTE__CONFIGS={}", xte.configs.display()),
+        &format!(
+            "  XTE__APPLICATIONS_DIRS={}",
+            xte.applications_dirs.display()
+        ),
     ]);
 
     Ok(())
@@ -232,7 +277,7 @@ See "man {self_name}" for more details."#
 mod test {
     use std::{
         collections::HashMap,
-        env::{self, VarError},
+        env,
         ffi::OsStr,
         sync::{LazyLock, Mutex},
     };
@@ -247,28 +292,32 @@ mod test {
     fn test_reset_keys() {
         let mut xte = Globals::default();
 
-        xte.is_terminal = String::from("Not default value for is_terminal");
-        xte.exec_usep = String::from("Not default value for exec_usep");
-        xte.execarg = String::from("Not default value for execarg");
-        xte.execarg_defined = String::from("Not default value for execarg_defined");
-        xte.appidarg = String::from("Not default value for appidarg");
-        xte.titlearg = String::from("Not default value for titlearg");
-        xte.dirarg = String::from("Not default value for dirarg");
-        xte.holdarg = String::from("Not default value for holdarg");
+        xte.is_terminal = OsString::from("Not default value for is_terminal");
+        xte.exec_usep = OsString::from("Not default value for exec_usep");
+        xte.execarg = OsString::from("Not default value for execarg");
+        xte.execarg_defined = OsString::from("Not default value for execarg_defined");
+        xte.appidarg = OsString::from("Not default value for appidarg");
+        xte.titlearg = OsString::from("Not default value for titlearg");
+        xte.dirarg = OsString::from("Not default value for dirarg");
+        xte.holdarg = OsString::from("Not default value for holdarg");
 
         reset_keys(&mut xte);
 
         assert!(xte.is_terminal.is_empty());
         assert!(xte.exec_usep.is_empty());
-        assert_eq!(xte.execarg, String::from("-e"));
-        assert_eq!(xte.execarg_defined, String::from("false"));
+        assert_eq!(xte.execarg, OsString::from("-e"));
+        assert_eq!(xte.execarg_defined, OsString::from("false"));
         assert!(xte.appidarg.is_empty());
         assert!(xte.titlearg.is_empty());
         assert!(xte.dirarg.is_empty());
         assert!(xte.holdarg.is_empty());
     }
 
-    fn overwrite_env<K: AsRef<OsStr>>(env: HashMap<K, Option<String>>) {
+    fn overwrite_env<K, V>(env: HashMap<K, Option<V>>)
+    where
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
         env.iter().for_each(|(name, value)| {
             match value {
                 Some(value) => unsafe {
@@ -281,22 +330,17 @@ mod test {
         });
     }
 
-    fn with_env<K, F, R>(env: HashMap<K, Option<String>>, function: &mut F) -> R
+    fn with_env<K, V, F, R>(env: HashMap<K, Option<V>>, function: &mut F) -> R
     where
         K: AsRef<OsStr> + Eq + std::hash::Hash + Copy,
+        V: AsRef<OsStr>,
         F: FnMut() -> R,
     {
         let _mutex_guard = ENV_LOCK.lock().unwrap();
-        let mut original_env: HashMap<K, Option<String>> = HashMap::new();
+        let mut original_env: HashMap<K, Option<OsString>> = HashMap::new();
 
         env.keys().for_each(|name: &K| {
-            original_env.insert(
-                name.clone(),
-                match env::var(name) {
-                    Err(VarError::NotPresent) => None,
-                    val => Some(val.unwrap()),
-                },
-            );
+            original_env.insert(name.clone(), env_var(name));
         });
 
         overwrite_env(env);
@@ -315,13 +359,10 @@ mod test {
 
         with_env(
             HashMap::from([
-                ("HOME", Some(String::from("/home/user"))),
-                (
-                    "XDG_CONFIG_HOME",
-                    Some(String::from("/home/user/.custom_config")),
-                ),
-                ("XDG_CONFIG_DIRS", Some(String::from("/etc/custom_config"))),
-                ("XDG_DATA_DIRS", Some(String::from("/etc/custom_data"))),
+                ("HOME", Some("/home/user")),
+                ("XDG_CONFIG_HOME", Some("/home/user/.custom_config")),
+                ("XDG_CONFIG_DIRS", Some("/etc/custom_config")),
+                ("XDG_DATA_DIRS", Some("/etc/custom_data")),
             ]),
             &mut || make_paths(&debugger, &mut xte),
         )
@@ -329,7 +370,7 @@ mod test {
 
         assert_eq!(
             xte.configs,
-            String::from(
+            OsString::from(
                 "/home/user/.custom_config/xdg-terminals.list:\
                 /etc/custom_config/xdg-terminals.list:\
                 /etc/custom_data/xdg-terminal-exec/xdg-terminals.list"
@@ -342,17 +383,14 @@ mod test {
         let debugger = build_debugger();
         let mut xte = Globals::default();
 
-        xte.lowercase_xdg_current_desktop = String::from("distro:DE");
+        xte.lowercase_xdg_current_desktop = OsString::from("distro:DE");
 
         with_env(
             HashMap::from([
-                ("HOME", Some(String::from("/home/user"))),
-                (
-                    "XDG_CONFIG_HOME",
-                    Some(String::from("/home/user/.custom_config")),
-                ),
-                ("XDG_CONFIG_DIRS", Some(String::from("/etc/custom_config"))),
-                ("XDG_DATA_DIRS", Some(String::from("/etc/custom_data"))),
+                ("HOME", Some("/home/user")),
+                ("XDG_CONFIG_HOME", Some("/home/user/.custom_config")),
+                ("XDG_CONFIG_DIRS", Some("/etc/custom_config")),
+                ("XDG_DATA_DIRS", Some("/etc/custom_data")),
             ]),
             &mut || make_paths(&debugger, &mut xte),
         )
@@ -360,7 +398,7 @@ mod test {
 
         assert_eq!(
             xte.configs,
-            String::from(
+            OsString::from(
                 "/home/user/.custom_config/distro-xdg-terminals.list:\
                 /home/user/.custom_config/DE-xdg-terminals.list:\
                 /home/user/.custom_config/xdg-terminals.list:\
@@ -381,17 +419,12 @@ mod test {
 
         with_env(
             HashMap::from([
-                ("HOME", Some(String::from("/home/user"))),
+                ("HOME", Some("/home/user")),
                 (
                     "XDG_DATA_HOME",
-                    Some(String::from(
-                        "/home/user/.custom_data1:/home/user/.custom_data2",
-                    )),
+                    Some("/home/user/.custom_data1:/home/user/.custom_data2"),
                 ),
-                (
-                    "XDG_DATA_DIRS",
-                    Some(String::from("/etc/custom_data1:/etc/custom_data2")),
-                ),
+                ("XDG_DATA_DIRS", Some("/etc/custom_data1:/etc/custom_data2")),
             ]),
             &mut || make_paths(&debugger, &mut xte),
         )
@@ -399,7 +432,7 @@ mod test {
 
         assert_eq!(
             xte.applications_dirs,
-            String::from(
+            OsString::from(
                 "/etc/custom_data2/applications/:\
                 /etc/custom_data1/applications/:\
                 /home/user/.custom_data2/applications/:\
@@ -415,15 +448,18 @@ mod test {
 
         with_env(
             HashMap::from([
-                ("HOME", Some(String::from("/home/user"))),
-                ("XDG_CACHE_HOME", Some(String::from("/tmp/cache"))),
+                ("HOME", Some("/home/user")),
+                ("XDG_CACHE_HOME", Some("/tmp/cache")),
             ]),
             &mut || make_paths(&debugger, &mut xte),
         )
         .unwrap();
 
-        assert_eq!(xte.xdg_cache_home, String::from("/tmp/cache"));
-        assert_eq!(xte.cache_file, String::from("/tmp/cache/xdg-terminal-exec"));
+        assert_eq!(xte.xdg_cache_home, OsString::from("/tmp/cache"));
+        assert_eq!(
+            xte.cache_file,
+            OsString::from("/tmp/cache/xdg-terminal-exec")
+        );
     }
 
     #[test]
@@ -432,45 +468,39 @@ mod test {
         let mut xte = Globals::default();
 
         with_env(
-            HashMap::from([
-                ("HOME", Some(String::from("/home/user"))),
-                ("XDG_CACHE_HOME", None),
-            ]),
+            HashMap::from([("HOME", Some("/home/user")), ("XDG_CACHE_HOME", None)]),
             &mut || make_paths(&debugger, &mut xte),
         )
         .unwrap();
 
-        assert_eq!(xte.xdg_cache_home, String::from("/home/user/.cache"));
+        assert_eq!(xte.xdg_cache_home, OsString::from("/home/user/.cache"));
         assert_eq!(
             xte.cache_file,
-            String::from("/home/user/.cache/xdg-terminal-exec")
+            OsString::from("/home/user/.cache/xdg-terminal-exec")
         );
     }
 
     #[test]
-    fn test_make_paths_but_xdg_config_home_and_home_are_not_set() -> Result<(), String> {
+    fn test_make_paths_but_xdg_config_home_and_home_are_not_set() {
         let debugger = build_debugger();
         let mut xte = Globals::default();
 
         let result = with_env(
-            HashMap::from([("HOME", None), ("XDG_CONFIG_HOME", None)]),
+            HashMap::<&str, Option<&str>>::from([("HOME", None), ("XDG_CONFIG_HOME", None)]),
             &mut || make_paths(&debugger, &mut xte),
         );
 
         match result {
-            Err(VarError::NotPresent) => Ok(()),
-            Ok(()) => Err(String::from(
-                "Expected make_paths to fail with variable not present",
-            )),
-            Err(VarError::NotUnicode(name)) => Err(format!(
-                "Expected make_paths to fail with variable not present, instead if failed due a unicode error on {:?}",
-                name
-            )),
+            Err(Error::UndefinedEnvVarError(name)) => assert_eq!(name, OsString::from("HOME")),
+            Ok(()) => assert!(
+                false,
+                "Expected make_paths to fail with variable not present"
+            ),
         }
     }
 
     #[test]
-    fn test_make_paths_but_xdg_data_home_and_home_are_not_set() -> Result<(), String> {
+    fn test_make_paths_but_xdg_data_home_and_home_are_not_set() {
         let debugger = build_debugger();
         let mut xte = Globals::default();
 
@@ -478,26 +508,23 @@ mod test {
             HashMap::from([
                 ("HOME", None),
                 // XDG_CONFIG_HOME is required to be present for this fallback
-                ("XDG_CONFIG_HOME", Some(String::from("/home/user"))),
+                ("XDG_CONFIG_HOME", Some("/home/user")),
                 ("XDG_DATA_HOME", None),
             ]),
             &mut || make_paths(&debugger, &mut xte),
         );
 
         match result {
-            Err(VarError::NotPresent) => Ok(()),
-            Ok(()) => Err(String::from(
-                "Expected make_paths to fail with variable not present",
-            )),
-            Err(VarError::NotUnicode(name)) => Err(format!(
-                "Expected make_paths to fail with variable not present, instead if failed due a unicode error on {:?}",
-                name
-            )),
+            Err(Error::UndefinedEnvVarError(name)) => assert_eq!(name, OsString::from("HOME")),
+            Ok(()) => assert!(
+                false,
+                "Expected make_paths to fail with variable not present"
+            ),
         }
     }
 
     #[test]
-    fn test_make_paths_but_xdg_cache_home_and_home_are_not_set() -> Result<(), String> {
+    fn test_make_paths_but_xdg_cache_home_and_home_are_not_set() {
         let debugger = build_debugger();
         let mut xte = Globals::default();
 
@@ -505,7 +532,7 @@ mod test {
             HashMap::from([
                 ("HOME", None),
                 // XDG_CONFIG_HOME is required to be present for this fallback
-                ("XDG_CONFIG_HOME", Some(String::from("/home/user"))),
+                ("XDG_CONFIG_HOME", Some("/home/user")),
                 // XDG_DATA_HOME is required to be present for this fallback
                 ("XDG_DATA_HOME", None),
                 ("XDG_CACHE_HOME", None),
@@ -514,14 +541,11 @@ mod test {
         );
 
         match result {
-            Err(VarError::NotPresent) => Ok(()),
-            Ok(()) => Err(String::from(
-                "Expected make_paths to fail with variable not present",
-            )),
-            Err(VarError::NotUnicode(name)) => Err(format!(
-                "Expected make_paths to fail with variable not present, instead if failed due a unicode error on {:?}",
-                name
-            )),
+            Err(Error::UndefinedEnvVarError(name)) => assert_eq!(name, OsString::from("HOME")),
+            Ok(()) => assert!(
+                false,
+                "Expected make_paths to fail with variable not present"
+            ),
         }
     }
 }
