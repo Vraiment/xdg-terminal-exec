@@ -10,6 +10,7 @@ use std::{
     os::unix::ffi::OsStrExt,
 };
 
+pub mod cache;
 pub mod debug;
 
 /// Method to retrieve an environment variable as an optional [`OsString`].
