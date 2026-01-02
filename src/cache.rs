@@ -12,11 +12,57 @@ use std::{
     collections::HashMap,
     ffi::OsStr,
     fmt::Display,
-    io::{self, Write},
+    fs::File,
+    io::{self, BufRead, Write},
+    path::Path,
     process::{Child, Command, Stdio},
 };
 
-use crate::debug::Debugger;
+use crate::{debug::Debugger, env_var};
+
+const LF: &str = r#"
+"#;
+const RSEP: char = '\u{1E}';
+
+/// Struct with the data that's cached between `xdg-terminal-exec`.
+/// 
+/// Fields are self explanatory.
+#[derive(Default)]
+pub struct Cache {
+    hash: String,
+    cmd: String,
+    pub exec_usep: String,
+    pub entry_path: String,
+    pub entry_id: String,
+    pub entry_action: String,
+    pub execarg: String,
+    pub appidarg: String,
+    pub titlearg: String,
+    pub dirarg: String,
+    pub holdarg: String,
+}
+
+/// Errors that can happen while reading the cache.
+#[derive(Debug)]
+pub enum ReadCacheError {
+    // An IO error happened while readin the cache file
+    CacheReadError(io::Error),
+    // An error ocurred while executing a script that's used to calculate the
+    // cache.
+    ScriptExecutionError(ScriptExecutionError),
+}
+
+impl From<ScriptExecutionError> for ReadCacheError {
+    fn from(error: ScriptExecutionError) -> Self {
+        ReadCacheError::ScriptExecutionError(error)
+    }
+}
+
+impl From<io::Error> for ReadCacheError {
+    fn from(error: io::Error) -> Self {
+        ReadCacheError::CacheReadError(error)
+    }
+}
 
 /// Errors for when executing a script, entries should be self explanatory.
 #[derive(Debug)]
@@ -27,6 +73,136 @@ pub enum ScriptExecutionError {
     SpawnError(io::Error),
     StdinWriteError(io::Error),
     WaitError(io::Error),
+}
+
+fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
+where
+    P: AsRef<Path>,
+{
+    let file = File::open(filename)?;
+    Ok(io::BufReader::new(file).lines())
+}
+
+fn check_cached_cmd(
+    debugger: &Box<dyn Debugger>,
+    cached_cmd: &str,
+) -> Result<bool, ScriptExecutionError> {
+    match execute_sh_script(debugger, &format!("command -v {cached_cmd} > /dev/null")) {
+        Ok(_) => Ok(true),
+        Err(error) => match error {
+            ScriptExecutionError::ScriptError(_) => Ok(false),
+            _ => Err(error),
+        },
+    }
+}
+
+/// Returns an optional [`Cache`] entry or if there was a major error reading
+/// the cache a [`ReadCacheError`].
+pub fn read_cache<T1, T2, T3>(
+    debugger: &Box<dyn Debugger>,
+    xte_cache_file: T1,
+    xte_configs: T2,
+    xte_applications_dirs: T3,
+) -> Result<Option<Cache>, ReadCacheError>
+where
+    T1: AsRef<OsStr>,
+    T2: AsRef<OsStr>,
+    T3: AsRef<OsStr>,
+{
+    let cache_file = Path::new(xte_cache_file.as_ref());
+
+    if cache_file.exists() {
+        let mut line_num = 0;
+        const LINE_LIMIT: u8 = 50;
+        let mut finished = false;
+        let mut cache: Cache = Cache::default();
+
+        for line in read_lines(cache_file)?.map_while(Result::ok) {
+            line_num += 1;
+            match line_num {
+                1 => cache.hash = line,
+                2 => cache.cmd = line,
+                3 => cache.entry_path = line,
+                4 => cache.entry_id = line,
+                5 => cache.entry_action = line,
+                6 => cache.execarg = line,
+                7 => cache.appidarg = line,
+                8 => cache.titlearg = line,
+                9 => cache.dirarg = line,
+                10 => cache.holdarg = line,
+                LINE_LIMIT => {
+                    debugger.print_line(&format!("reached cache line limit ({LINE_LIMIT})"));
+                    return Ok(None);
+                }
+                _ => {
+                    // Command is stored as raw expanded and tokenized $XTE__USEP-separated command,
+                    // technically it can contain newline characters.
+                    // Reconstruct newlines, use ${XTE__RSEP}END_OF_EXEC_USEP string as terminator.
+                    cache.exec_usep = if cache.exec_usep.is_empty() {
+                        line.clone()
+                    } else {
+                        format!("{}{LF}{line}", cache.exec_usep)
+                    };
+
+                    if let Some(final_cached_exec_usep) = cache
+                        .exec_usep
+                        .strip_suffix(&format!("{RSEP}END_OF_EXEC_USEP"))
+                    {
+                        cache.exec_usep = final_cached_exec_usep.to_owned();
+                        finished = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if finished {
+            debugger.print_slice(&[
+                &"got cache",
+                &format!("hash={}", cache.hash),
+                &format!("cmd={}", cache.cmd),
+                &format!("entry_path={}", cache.entry_path),
+                &format!("entry_id={}", cache.entry_id),
+                &format!("entry_action={}", cache.entry_action),
+                &format!("execarg={}", cache.execarg),
+                &format!("appidarg={}", cache.appidarg),
+                &format!("titlearg={}", cache.titlearg),
+                &format!("dirarg={}", cache.dirarg),
+                &format!("holdarg={}", cache.holdarg),
+                &format!("exec_usep={}", cache.exec_usep),
+            ]);
+
+            let hash = gen_hash(
+                debugger,
+                env_var("xdg_current_desktop").unwrap_or_default(),
+                xte_configs.as_ref(),
+                xte_applications_dirs.as_ref(),
+            );
+            let hash = match hash {
+                Ok(hash) => hash,
+                Err(error) => match error {
+                    ScriptExecutionError::ScriptError(_) => return Ok(None),
+                    error => return Err(ReadCacheError::ScriptExecutionError(error)),
+                },
+            };
+
+            if hash == cache.hash && check_cached_cmd(debugger, &cache.cmd)? {
+                debugger.print_line(&"cache is actual");
+
+                Ok(Some(cache))
+            } else {
+                debugger.print_line(&"cache is out-of-date");
+
+                Ok(None)
+            }
+        } else {
+            debugger.print_line(&"invalid cache data");
+            Ok(None)
+        }
+    } else {
+        debugger.print_line(&"no cache data");
+        Ok(None)
+    }
 }
 
 fn write_script_to_stdin(child: &mut Child, script: &str) -> Result<(), ScriptExecutionError> {
@@ -108,24 +284,30 @@ fn execute_sh_script(
     execute_sh_script_with_env(debugger, &HashMap::<&OsStr, Option<&OsStr>>::new(), script)
 }
 
-fn gen_hash<T>(
+fn gen_hash<T1, T2, T3>(
     debugger: &Box<dyn Debugger>,
-    xdg_current_desktop: T,
-    xte_configs: T,
-    xte_applications_dirs: T,
+    xdg_current_desktop: T1,
+    xte_configs: T2,
+    xte_applications_dirs: T3,
 ) -> Result<String, ScriptExecutionError>
 where
-    T: AsRef<OsStr>,
+    T1: AsRef<OsStr>,
+    T2: AsRef<OsStr>,
+    T3: AsRef<OsStr>,
 {
+    let xdg_current_desktop = xdg_current_desktop.as_ref();
+    let xte_configs = xte_configs.as_ref();
+    let xte_applications_dirs = xte_applications_dirs.as_ref();
+
     if debugger.is_enabled() {
         let mut message = vec![format!(
             ">     hashing '{}' and listing of:",
-            xdg_current_desktop.as_ref().display()
+            xdg_current_desktop.display()
         )];
         format!(
             "{}:{}",
-            xte_configs.as_ref().display(),
-            xte_applications_dirs.as_ref().display()
+            xte_configs.display(),
+            xte_applications_dirs.display()
         )
         .split(':')
         .for_each(|path| message.push(path.to_owned()));
