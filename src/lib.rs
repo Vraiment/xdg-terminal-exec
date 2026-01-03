@@ -264,6 +264,41 @@ where
     result
 }
 
+/// Simplified [`OsStr`] equivalent of [`str::strip_suffix`].
+///
+/// ```
+/// use std::ffi::OsStr;
+/// use xdg_terminal_exec::os_str_strip_suffix;
+///
+/// let value = OsStr::new("bar:foo");
+/// assert_eq!(os_str_strip_suffix(&value, ":foo"), Some(OsStr::new("bar")));
+///
+/// let value = OsStr::new("bar:foo");
+/// assert_eq!(os_str_strip_suffix(&value, "bar"), None);
+///
+/// let value = OsStr::new("foofoo");
+/// assert_eq!(os_str_strip_suffix(&value, "foo"), Some(OsStr::new("foo")));
+/// ```
+pub fn os_str_strip_suffix<'a, T1, T2>(string: &'a T1, suffix: T2) -> Option<&'a OsStr>
+where
+    T1: AsRef<OsStr>,
+    T2: AsRef<OsStr>,
+{
+    let string_bytes = string.as_ref().as_bytes();
+    let suffix_bytes = suffix.as_ref().as_bytes();
+
+    let mut n = string_bytes.len() - 1;
+    for suffix_byte in suffix_bytes.iter().rev() {
+        if string_bytes[n] != *suffix_byte {
+            return None;
+        }
+
+        n -= 1;
+    }
+
+    Some(OsStr::from_bytes(&string_bytes[..n + 1]))
+}
+
 #[cfg(test)]
 mod test {
     use std::fs;
@@ -466,5 +501,29 @@ mod test {
         }
 
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_os_str_strip_suffix_when_suffix_is_valid() {
+        let string = String::from("value:suffix");
+
+        assert_eq!(
+            os_str_strip_suffix(&string, ":suffix"),
+            Some(OsStr::new("value")),
+        );
+    }
+
+    #[test]
+    fn test_os_str_strip_suffix_when_suffix_is_not_valid() {
+        let string = String::from("value");
+
+        assert_eq!(os_str_strip_suffix(&string, ":suffix"), None);
+    }
+
+    #[test]
+    fn test_os_str_strip_suffix_when_suffix_is_empty() {
+        let string = String::from("value");
+
+        assert_eq!(os_str_strip_suffix(&string, ""), Some(OsStr::new("value")));
     }
 }
