@@ -7,7 +7,10 @@ use std::{
     char::TryFromCharError,
     env::{self, VarError},
     ffi::{OsStr, OsString},
-    os::unix::ffi::OsStrExt,
+    fs::File,
+    io::{self, BufRead, BufReader},
+    os::unix::ffi::{OsStrExt, OsStringExt},
+    path::Path,
 };
 
 pub mod cache;
@@ -197,6 +200,31 @@ where
     }
 }
 
+/// Returns an iterator that reads lines from the given `filename` as `OsString`
+/// values.
+///
+/// ```no_run
+/// use std::fs::File;
+/// use xdg_terminal_exec::os_str_split;
+///
+/// let file = Path::new("myfile.txt");
+///
+/// for line in read_lines(file).unwrap().map_while(Result::ok) {
+///     // Line holds an `OsString` with the contents
+/// }
+/// ```
+pub fn os_str_read_lines<P>(filename: P) -> io::Result<impl Iterator<Item = io::Result<OsString>>>
+where
+    P: AsRef<Path>,
+{
+    let file = File::open(filename)?;
+    let iterator = BufReader::new(file)
+        .split(b'\n')
+        .map(|result| result.map(OsString::from_vec));
+
+    Ok(iterator)
+}
+
 /// idem, this method is to cover for the absense of a `format!` macro that's
 /// able to take `OsString` or `OsStr` values.
 ///
@@ -238,6 +266,10 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::fs;
+
+    use super::testing::TempFile;
+
     use super::*;
 
     #[test]
@@ -374,5 +406,65 @@ mod test {
             os_str_concat(&vec!(&"value1", "value2", "value3")),
             OsString::from("value1value2value3")
         );
+    }
+
+    #[test]
+    fn test_os_str_read_lines_with_empty_file() {
+        let dev_null = Path::new("/dev/null");
+        let mut result: Vec<OsString> = vec![];
+
+        for line in os_str_read_lines(dev_null).unwrap().map_while(Result::ok) {
+            result.push(line);
+        }
+
+        assert_eq!(result, Vec::<OsString>::new());
+    }
+
+    #[test]
+    fn test_os_str_read_lines_with_multiple_lines() {
+        let temp_file = TempFile::new().unwrap();
+        let temp_file = temp_file.path();
+        let expected = vec![
+            OsString::from("value 1"),
+            OsString::from("line 2"),
+            OsString::from("entry 3"),
+        ];
+
+        let mut contents: Vec<u8> = Vec::new();
+        for line in &expected {
+            contents.extend_from_slice(line.as_bytes());
+            contents.push(10); // Add the `\n` character
+        }
+        fs::write(temp_file, contents).unwrap();
+
+        let mut result: Vec<OsString> = vec![];
+
+        for line in os_str_read_lines(temp_file).unwrap().map_while(Result::ok) {
+            result.push(line);
+        }
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_os_str_read_lines_with_empty_lines() {
+        let temp_file = TempFile::new().unwrap();
+        let temp_file = temp_file.path();
+        let expected = vec![OsString::from(""), OsString::from(""), OsString::from("")];
+
+        let mut contents: Vec<u8> = Vec::new();
+        for line in &expected {
+            contents.extend_from_slice(line.as_bytes());
+            contents.push(10); // Add the `\n` character
+        }
+        fs::write(temp_file, contents).unwrap();
+
+        let mut result: Vec<OsString> = vec![];
+
+        for line in os_str_read_lines(temp_file).unwrap().map_while(Result::ok) {
+            result.push(line);
+        }
+
+        assert_eq!(result, expected);
     }
 }
