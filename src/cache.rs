@@ -10,36 +10,36 @@
 
 use std::{
     collections::HashMap,
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     fmt::Display,
-    fs::File,
-    io::{self, BufRead, Write},
+    io::{self, Write},
+    os::unix::ffi::OsStrExt,
     path::Path,
     process::{Child, Command, Stdio},
 };
 
-use crate::{debug::Debugger, env_var};
+use crate::{debug::Debugger, env_var, os_str_concat, os_str_read_lines, os_str_strip_suffix};
 
 const LF: &str = r#"
 "#;
 const RSEP: char = '\u{1E}';
 
 /// Struct with the data that's cached between `xdg-terminal-exec`.
-/// 
+///
 /// Fields are self explanatory.
 #[derive(Default)]
 pub struct Cache {
-    hash: String,
-    cmd: String,
-    pub exec_usep: String,
-    pub entry_path: String,
-    pub entry_id: String,
-    pub entry_action: String,
-    pub execarg: String,
-    pub appidarg: String,
-    pub titlearg: String,
-    pub dirarg: String,
-    pub holdarg: String,
+    hash: OsString,
+    cmd: OsString,
+    pub exec_usep: OsString,
+    pub entry_path: OsString,
+    pub entry_id: OsString,
+    pub entry_action: OsString,
+    pub execarg: OsString,
+    pub appidarg: OsString,
+    pub titlearg: OsString,
+    pub dirarg: OsString,
+    pub holdarg: OsString,
 }
 
 /// Errors that can happen while reading the cache.
@@ -75,19 +75,21 @@ pub enum ScriptExecutionError {
     WaitError(io::Error),
 }
 
-fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
-where
-    P: AsRef<Path>,
-{
-    let file = File::open(filename)?;
-    Ok(io::BufReader::new(file).lines())
-}
-
-fn check_cached_cmd(
+fn check_cached_cmd<T>(
     debugger: &Box<dyn Debugger>,
-    cached_cmd: &str,
-) -> Result<bool, ScriptExecutionError> {
-    match execute_sh_script(debugger, &format!("command -v {cached_cmd} > /dev/null")) {
+    cached_cmd: T,
+) -> Result<bool, ScriptExecutionError>
+where
+    T: AsRef<OsStr>,
+{
+    // Equivalent to `format!("command -v {cached_cmd} > /dev/null")`
+    let script = os_str_concat(&[
+        OsStr::new("command -v "),
+        cached_cmd.as_ref(),
+        OsStr::new(" > /dev/null"),
+    ]);
+
+    match execute_sh_script(debugger, script) {
         Ok(_) => Ok(true),
         Err(error) => match error {
             ScriptExecutionError::ScriptError(_) => Ok(false),
@@ -117,7 +119,7 @@ where
         let mut finished = false;
         let mut cache: Cache = Cache::default();
 
-        for line in read_lines(cache_file)?.map_while(Result::ok) {
+        for line in os_str_read_lines(cache_file)?.map_while(Result::ok) {
             line_num += 1;
             match line_num {
                 1 => cache.hash = line,
@@ -138,17 +140,25 @@ where
                     // Command is stored as raw expanded and tokenized $XTE__USEP-separated command,
                     // technically it can contain newline characters.
                     // Reconstruct newlines, use ${XTE__RSEP}END_OF_EXEC_USEP string as terminator.
-                    cache.exec_usep = if cache.exec_usep.is_empty() {
+                    let cache_exec_usep = cache.exec_usep.clone();
+                    cache.exec_usep = if cache_exec_usep.is_empty() {
                         line.clone()
                     } else {
-                        format!("{}{LF}{line}", cache.exec_usep)
+                        // Equivalent to `format!("{}{LF}{line}", cache.exec_usep)`
+                        os_str_concat(&[cache_exec_usep.as_os_str(), OsStr::new(LF), &line])
                     };
 
-                    if let Some(final_cached_exec_usep) = cache
-                        .exec_usep
-                        .strip_suffix(&format!("{RSEP}END_OF_EXEC_USEP"))
-                    {
-                        cache.exec_usep = final_cached_exec_usep.to_owned();
+                    let cache_exec_usep = os_str_strip_suffix(
+                        &cache_exec_usep,
+                        // Equivalent to `format!("{RSEP}END_OF_EXEC_USEP")`
+                        os_str_concat(&[
+                            OsString::from(RSEP.to_string()).as_os_str(),
+                            OsStr::new("END_OF_EXEC_USEP"),
+                        ]),
+                    );
+
+                    if let Some(cache_exec_usep) = cache_exec_usep {
+                        cache.exec_usep = cache_exec_usep.to_owned();
                         finished = true;
                         break;
                     }
@@ -159,27 +169,27 @@ where
         if finished {
             debugger.print_slice(&[
                 &"got cache",
-                &format!("hash={}", cache.hash),
-                &format!("cmd={}", cache.cmd),
-                &format!("entry_path={}", cache.entry_path),
-                &format!("entry_id={}", cache.entry_id),
-                &format!("entry_action={}", cache.entry_action),
-                &format!("execarg={}", cache.execarg),
-                &format!("appidarg={}", cache.appidarg),
-                &format!("titlearg={}", cache.titlearg),
-                &format!("dirarg={}", cache.dirarg),
-                &format!("holdarg={}", cache.holdarg),
-                &format!("exec_usep={}", cache.exec_usep),
+                &format!("hash={}", cache.hash.display()),
+                &format!("cmd={}", cache.cmd.display()),
+                &format!("entry_path={}", cache.entry_path.display()),
+                &format!("entry_id={}", cache.entry_id.display()),
+                &format!("entry_action={}", cache.entry_action.display()),
+                &format!("execarg={}", cache.execarg.display()),
+                &format!("appidarg={}", cache.appidarg.display()),
+                &format!("titlearg={}", cache.titlearg.display()),
+                &format!("dirarg={}", cache.dirarg.display()),
+                &format!("holdarg={}", cache.holdarg.display()),
+                &format!("exec_usep={}", cache.exec_usep.display()),
             ]);
 
-            let hash = gen_hash(
+            let hash_result = gen_hash(
                 debugger,
                 env_var("xdg_current_desktop").unwrap_or_default(),
                 xte_configs.as_ref(),
                 xte_applications_dirs.as_ref(),
             );
-            let hash = match hash {
-                Ok(hash) => hash,
+            let hash = match hash_result {
+                Ok(hash) => OsString::from(hash),
                 Err(error) => match error {
                     ScriptExecutionError::ScriptError(_) => return Ok(None),
                     error => return Err(ReadCacheError::ScriptExecutionError(error)),
@@ -205,10 +215,13 @@ where
     }
 }
 
-fn write_script_to_stdin(child: &mut Child, script: &str) -> Result<(), ScriptExecutionError> {
+fn write_script_to_stdin<T>(child: &mut Child, script: T) -> Result<(), ScriptExecutionError>
+where
+    T: AsRef<OsStr>,
+{
     match child.stdin.take() {
         Some(mut stdin) => stdin
-            .write_all(script.as_bytes())
+            .write_all(script.as_ref().as_bytes())
             .map_err(ScriptExecutionError::StdinWriteError),
         None => Err(ScriptExecutionError::MissingStdinError),
     }
@@ -217,14 +230,15 @@ fn write_script_to_stdin(child: &mut Child, script: &str) -> Result<(), ScriptEx
 /// Invokes the given `script` using `/bin/sh` and setting the environment variables
 /// to the given values. Any call site for this should be substituted by proper
 /// native Rust code in the future.
-fn execute_sh_script_with_env<K, V>(
+fn execute_sh_script_with_env<K, V, T>(
     debugger: &Box<dyn Debugger>,
     env: &HashMap<K, Option<V>>,
-    script: &str,
+    script: T,
 ) -> Result<Vec<u8>, ScriptExecutionError>
 where
     K: AsRef<OsStr>,
     V: AsRef<OsStr>,
+    T: AsRef<OsStr>,
 {
     let mut command = Command::new("/bin/sh");
 
@@ -277,10 +291,13 @@ where
     }
 }
 
-fn execute_sh_script(
+fn execute_sh_script<T>(
     debugger: &Box<dyn Debugger>,
-    script: &str,
-) -> Result<Vec<u8>, ScriptExecutionError> {
+    script: T,
+) -> Result<Vec<u8>, ScriptExecutionError>
+where
+    T: AsRef<OsStr>,
+{
     execute_sh_script_with_env(debugger, &HashMap::<&OsStr, Option<&OsStr>>::new(), script)
 }
 
@@ -540,7 +557,7 @@ mod test {
     //                 LANG=C ls -LRl ${xte__hash_paths} 2> /dev/null
     //             } | md5sum 2> /dev/null
     //         )
-    //     EOH
+    // EOH
     //
     //     echo "$xte__hash"
     // }
@@ -550,7 +567,7 @@ mod test {
     // let xdg_current_desktop = "$XDG_CURRENT_DESKTOP";
     // let xte_configs = "$XTE__CONFIGS";
     // let xte_applications_dirs = "$XTE__APPLICATIONS_DIRS";
-    // let expected_hash = "$xte__hash";
+    // let expected_hash = "$(gen_hash)";
     // EOF
     // ```
     #[test]
