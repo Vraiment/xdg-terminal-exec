@@ -14,7 +14,7 @@
 //! ```
 use std::fmt::Display;
 
-use crate::*;
+use super::*;
 
 /// Trait to describe a debugger object.
 ///

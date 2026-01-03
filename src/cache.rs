@@ -345,7 +345,7 @@ mod test {
     use std::ffi::OsString;
     use std::{cell::RefCell, rc::Rc};
 
-    use crate::cache::*;
+    use super::*;
     use crate::debug::Debugger;
 
     #[derive(Default)]

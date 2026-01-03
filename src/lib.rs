@@ -238,7 +238,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::*;
+    use super::*;
 
     #[test]
     fn test_check_bool_for_true_values() -> Result<(), String> {

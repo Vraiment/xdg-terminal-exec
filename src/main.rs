@@ -284,7 +284,7 @@ mod test {
 
     use xdg_terminal_exec::debug::build_debugger;
 
-    use crate::*;
+    use super::*;
 
     static ENV_LOCK: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 

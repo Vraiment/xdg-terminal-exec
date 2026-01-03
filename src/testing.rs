@@ -113,7 +113,7 @@ fn byte_to_alphanumeric_ascii(byte: u8) -> char {
 mod test {
     use std::{env, ffi::OsString, fs};
 
-    use crate::testing::*;
+    use super::*;
 
     #[test]
     fn test_byte_to_alphanumeric_ascii() {
