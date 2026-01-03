@@ -15,7 +15,7 @@ use std::{
 
 pub mod cache;
 pub mod debug;
-pub(crate) mod testing;
+pub mod testing;
 
 /// Method to retrieve an environment variable as an optional [`OsString`].
 ///

@@ -4,12 +4,98 @@
 //! execution of `xdg-terminal-exec`.
 
 use std::{
+    collections::HashMap,
     env,
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     fs::{self, File},
     io::{self, Read},
     path::{Path, PathBuf},
+    sync::{LazyLock, Mutex},
 };
+
+use crate::env_var;
+
+static ENV_LOCK: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
+
+/// Executes the given `function` using the environment defined by `env`
+/// preserving the original environment using a lock.
+/// 
+/// The locking mechanism is important because tests will run in parallel and
+/// which can cause for one test to populate other test's environment. Be
+/// aware that this means the tests that use [`with_env`] will be serialized.
+/// 
+/// ```
+/// use std::{
+///     collections::HashMap,
+///     env::{self, VarError},
+/// };
+/// 
+/// use xdg_terminal_exec::testing::with_env;
+/// 
+/// unsafe {
+///     env::set_var("MY_CUSTOM_ENV_VAR_SET", "value");
+///     env::remove_var("MY_CUSTOM_ENV_VAR_UNSET");
+/// };
+/// 
+/// // Validate the environment is as expected
+/// assert_eq!(env::var("MY_CUSTOM_ENV_VAR_SET"), Ok(String::from("value")));
+/// assert_eq!(env::var("MY_CUSTOM_ENV_VAR_UNSET"), Err(VarError::NotPresent));
+/// 
+/// with_env(
+///     // Flip the values from within the function.
+///     HashMap::from([
+///         ("MY_CUSTOM_ENV_VAR_SET", None),
+///         ("MY_CUSTOM_ENV_VAR_UNSET", Some("value")),
+///     ]),
+///     &mut || {
+///         // The values will change within the function from the given hash.
+///         assert_eq!(env::var("MY_CUSTOM_ENV_VAR_SET"), Err(VarError::NotPresent));
+///         assert_eq!(env::var("MY_CUSTOM_ENV_VAR_UNSET"), Ok(String::from("value")));
+///     },
+/// );
+/// 
+/// // Validate the environment has been restored
+/// assert_eq!(env::var("MY_CUSTOM_ENV_VAR_SET"), Ok(String::from("value")));
+/// assert_eq!(env::var("MY_CUSTOM_ENV_VAR_UNSET"), Err(VarError::NotPresent));
+/// ```
+pub fn with_env<K, V, F, R>(env: HashMap<K, Option<V>>, function: &mut F) -> R
+where
+    K: AsRef<OsStr> + Eq + std::hash::Hash + Copy,
+    V: AsRef<OsStr>,
+    F: FnMut() -> R,
+{
+    let _mutex_guard = ENV_LOCK.lock().unwrap();
+    let mut original_env: HashMap<K, Option<OsString>> = HashMap::new();
+
+    env.keys().for_each(|name: &K| {
+        original_env.insert(name.clone(), env_var(name));
+    });
+
+    overwrite_env(env);
+
+    let result = function();
+
+    overwrite_env(original_env);
+
+    result
+}
+
+fn overwrite_env<K, V>(env: HashMap<K, Option<V>>)
+where
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
+{
+    env.iter().for_each(|(name, value)| {
+        match value {
+            Some(value) => unsafe {
+                env::set_var(name, value);
+            },
+            None => unsafe {
+                env::remove_var(name);
+            },
+        };
+    });
+}
 
 /// Mimics the [`mktemp`](https://www.man7.org/linux/man-pages/man1/mktemp.1.html)
 /// command's behavior plus ensuring the file gets deleted after dropping.

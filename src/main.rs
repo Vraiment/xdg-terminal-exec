@@ -275,18 +275,12 @@ See "man {self_name}" for more details."#
 
 #[cfg(test)]
 mod test {
-    use std::{
-        collections::HashMap,
-        env,
-        ffi::OsStr,
-        sync::{LazyLock, Mutex},
-    };
+    use std::collections::HashMap;
 
     use xdg_terminal_exec::debug::build_debugger;
+    use xdg_terminal_exec::testing::with_env;
 
     use super::*;
-
-    static ENV_LOCK: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
     #[test]
     fn test_reset_keys() {
@@ -311,45 +305,6 @@ mod test {
         assert!(xte.titlearg.is_empty());
         assert!(xte.dirarg.is_empty());
         assert!(xte.holdarg.is_empty());
-    }
-
-    fn overwrite_env<K, V>(env: HashMap<K, Option<V>>)
-    where
-        K: AsRef<OsStr>,
-        V: AsRef<OsStr>,
-    {
-        env.iter().for_each(|(name, value)| {
-            match value {
-                Some(value) => unsafe {
-                    env::set_var(name, value);
-                },
-                None => unsafe {
-                    env::remove_var(name);
-                },
-            };
-        });
-    }
-
-    fn with_env<K, V, F, R>(env: HashMap<K, Option<V>>, function: &mut F) -> R
-    where
-        K: AsRef<OsStr> + Eq + std::hash::Hash + Copy,
-        V: AsRef<OsStr>,
-        F: FnMut() -> R,
-    {
-        let _mutex_guard = ENV_LOCK.lock().unwrap();
-        let mut original_env: HashMap<K, Option<OsString>> = HashMap::new();
-
-        env.keys().for_each(|name: &K| {
-            original_env.insert(name.clone(), env_var(name));
-        });
-
-        overwrite_env(env);
-
-        let result = function();
-
-        overwrite_env(original_env);
-
-        result
     }
 
     #[test]
