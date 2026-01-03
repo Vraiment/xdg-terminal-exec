@@ -19,28 +19,28 @@ static ENV_LOCK: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
 /// Executes the given `function` using the environment defined by `env`
 /// preserving the original environment using a lock.
-/// 
+///
 /// The locking mechanism is important because tests will run in parallel and
 /// which can cause for one test to populate other test's environment. Be
 /// aware that this means the tests that use [`with_env`] will be serialized.
-/// 
+///
 /// ```
 /// use std::{
 ///     collections::HashMap,
 ///     env::{self, VarError},
 /// };
-/// 
+///
 /// use xdg_terminal_exec::testing::with_env;
-/// 
+///
 /// unsafe {
 ///     env::set_var("MY_CUSTOM_ENV_VAR_SET", "value");
 ///     env::remove_var("MY_CUSTOM_ENV_VAR_UNSET");
 /// };
-/// 
+///
 /// // Validate the environment is as expected
 /// assert_eq!(env::var("MY_CUSTOM_ENV_VAR_SET"), Ok(String::from("value")));
 /// assert_eq!(env::var("MY_CUSTOM_ENV_VAR_UNSET"), Err(VarError::NotPresent));
-/// 
+///
 /// with_env(
 ///     // Flip the values from within the function.
 ///     HashMap::from([
@@ -53,7 +53,7 @@ static ENV_LOCK: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 ///         assert_eq!(env::var("MY_CUSTOM_ENV_VAR_UNSET"), Ok(String::from("value")));
 ///     },
 /// );
-/// 
+///
 /// // Validate the environment has been restored
 /// assert_eq!(env::var("MY_CUSTOM_ENV_VAR_SET"), Ok(String::from("value")));
 /// assert_eq!(env::var("MY_CUSTOM_ENV_VAR_UNSET"), Err(VarError::NotPresent));
