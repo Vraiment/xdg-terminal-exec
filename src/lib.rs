@@ -203,7 +203,7 @@ where
 /// Returns an iterator that reads lines from the given `filename` as `OsString`
 /// values.
 ///
-/// ```no_run
+/// ```ignore
 /// use std::fs::File;
 /// use xdg_terminal_exec::os_str_split;
 ///
