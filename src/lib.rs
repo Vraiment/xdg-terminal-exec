@@ -299,6 +299,86 @@ where
     Some(OsStr::from_bytes(&string_bytes[..n + 1]))
 }
 
+/// idem, true if `string` starts with `value`
+///
+/// ```
+/// use xdg_terminal_exec::os_str_starts_with;
+///
+/// // `value1` starts with `value1`
+/// assert!(os_str_starts_with("value1", "value1"));
+///
+/// // `value1 extra text` starts with `value1`
+/// assert!(os_str_starts_with("value1 extra text", "value1"));
+///
+/// // `value1 extra text` doesn't start with `value2`
+/// assert!(!os_str_starts_with("value1 extra text", "value2"));
+///
+/// // `value1` doesn't start with `value1 extra text`
+/// assert!(!os_str_starts_with("value1", "value1 extra text"));
+/// ```
+pub fn os_str_starts_with<T1, T2>(string: T1, value: T2) -> bool
+where
+    T1: AsRef<OsStr>,
+    T2: AsRef<OsStr>,
+{
+    let string = string.as_ref();
+    let value = value.as_ref();
+
+    if value.len() > string.len() {
+        return false;
+    }
+
+    let string_bytes = string.as_bytes();
+    for (n, byte) in value.as_bytes().iter().enumerate() {
+        if *byte != string_bytes[n] {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Trims whitespaces from the beginning and end of the given `string`
+///
+/// ```
+/// use xdg_terminal_exec::os_str_trim;
+///
+/// assert_eq!(os_str_trim(&"a random string"), "a random string");
+/// assert_eq!(os_str_trim(&" \t\na random string"), "a random string");
+/// assert_eq!(os_str_trim(&"a random string \t\n"), "a random string");
+/// assert_eq!(os_str_trim(&" \t\na random string \t\n"), "a random string");
+/// assert_eq!(os_str_trim(&" \t\n"), ""); // Removes everything
+/// ```
+pub fn os_str_trim<'a, T>(string: &'a T) -> &'a OsStr
+where
+    T: AsRef<OsStr>,
+{
+    let string = string.as_ref();
+    let bytes = string.as_bytes();
+
+    const NEW_LINE_CHARACTERS: &[u8] = &[0x20, 0x09, 0x0A];
+
+    let mut start = 0;
+    while start < bytes.len() {
+        if !NEW_LINE_CHARACTERS.contains(&bytes[start]) {
+            break;
+        }
+
+        start += 1;
+    }
+
+    let mut end = bytes.len() - 1;
+    while end >= start {
+        if !NEW_LINE_CHARACTERS.contains(&bytes[end]) {
+            break;
+        }
+
+        end -= 1;
+    }
+
+    OsStr::from_bytes(&bytes[start..=end])
+}
+
 #[cfg(test)]
 mod test {
     use std::fs;
@@ -525,5 +605,50 @@ mod test {
         let string = String::from("value");
 
         assert_eq!(os_str_strip_suffix(&string, ""), Some(OsStr::new("value")));
+    }
+
+    #[test]
+    fn test_os_str_starts_with_when_value_is_the_same() {
+        assert!(os_str_starts_with("value1", "value1"));
+    }
+
+    #[test]
+    fn test_os_str_starts_with_when_it_starts_with() {
+        assert!(os_str_starts_with("value1 extra text", "value1"));
+    }
+
+    #[test]
+    fn test_os_str_starts_with_when_it_does_not_starts_with() {
+        assert!(!os_str_starts_with("value1 extra text", "value2"));
+    }
+
+    #[test]
+    fn test_os_str_starts_with_when_the_value_is_too_large() {
+        assert!(!os_str_starts_with("value1", "value1 extra text"));
+    }
+
+    #[test]
+    fn test_os_str_trim_without_anything_to_trim() {
+        assert_eq!(os_str_trim(&"a random string"), "a random string");
+    }
+
+    #[test]
+    fn test_os_str_trim_with_whitespaces_at_the_beginning() {
+        assert_eq!(os_str_trim(&" \t\na random string"), "a random string");
+    }
+
+    #[test]
+    fn test_os_str_trim_with_whitespaces_at_the_end() {
+        assert_eq!(os_str_trim(&"a random string \t\n"), "a random string");
+    }
+
+    #[test]
+    fn test_os_str_trim_with_whitespaces_at_the_beginning_and_end() {
+        assert_eq!(os_str_trim(&" \t\na random string \t\n"), "a random string");
+    }
+
+    #[test]
+    fn test_os_str_trim_with_only_whitespaces() {
+        assert_eq!(os_str_trim(&" \t\n"), "");
     }
 }
