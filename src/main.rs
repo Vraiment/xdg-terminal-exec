@@ -1,11 +1,16 @@
 use std::{
     env,
     ffi::{OsStr, OsString},
+    fmt::Display,
+    io,
     path::Path,
     process::exit,
 };
 
 use xdg_terminal_exec::{
+    LF,
+    cache::read_cache,
+    check_bool,
     debug::{Debugger, build_debugger},
     emplace_to_csv_list, env_var, os_str_concat, os_str_remove_trailing_slash, os_str_split,
     push_to_csv_list,
@@ -48,6 +53,14 @@ struct Globals {
     // applications_dirs: OsString, // duplicated
     cache_file: OsString,
     xdg_cache_home: OsString,
+    // The following are used related to cache
+    cache_used: OsString,
+    entry_ids: OsString,
+    fallback_entry_ids: OsString,
+    excluded_entry_ids: OsString,
+    included_entry_ids: OsString,
+    cache_enabled: OsString,
+    cache_configured: OsString,
 }
 
 fn main() {
@@ -72,6 +85,67 @@ fn main() {
 
     let debugger = build_debugger();
     make_paths(&debugger, &mut xte).unwrap();
+
+    xte.cache_enabled = env_var("XTE_CACHE_ENABLED").unwrap_or(OsString::from("true"));
+    xte.cache_configured = env_var("XTE_CACHE_ENABLED").unwrap_or_default();
+
+    let cache = if check_bool(&xte.cache_enabled) {
+        read_cache(
+            &debugger,
+            &xte.cache_file,
+            &xte.configs,
+            &xte.applications_dirs,
+        )
+        .unwrap()
+    } else {
+        None
+    };
+
+    if cache.is_some() {
+        xte.cache_used = OsString::from("true");
+    } else {
+        // continue with globals
+        xte.cache_used = OsString::from("false");
+
+        // All desktop entry ids in descending order of preference from *xdg-terminals.list configs,
+        // with duplicates removed
+        xte.entry_ids = OsString::new();
+        // All desktop entry ids found in data dirs in descending order of preference,
+        // with duplicates (including those in $XTE__ENTRY_IDS) removed
+        xte.fallback_entry_ids = OsString::new();
+
+        //# Entry IDs excluded from fallback by '-entry.desktop' directives
+        xte.excluded_entry_ids = OsString::new();
+        // Entry IDS included (exclusion prevented) by '+entry.desktop' directives
+        xte.included_entry_ids = OsString::new();
+
+        // Modifies $XTE__ENTRY_IDS
+        read_config_paths(&debugger, &mut xte).unwrap();
+        // Modifies $XTE__ENTRY_IDS and sets global aliases
+        find_entry_paths(&debugger, &mut xte).unwrap();
+
+        if debugger.is_enabled() {
+            assert!(LF.len() == 1, "{LF} should have a single character");
+            let lf_as_char = LF.chars().next().unwrap();
+
+            debugger.print_line(&">     final entry ID list:");
+            for line in os_str_split(&xte.entry_ids, lf_as_char).unwrap() {
+                debugger.print_line(&line.display());
+            }
+            debugger.print_line(&"^     end of final entry ID list");
+
+            debugger.print_line(&">     final fallback entry ID list:");
+            for line in os_str_split(&xte.fallback_entry_ids, lf_as_char).unwrap() {
+                debugger.print_line(&line.display());
+            }
+            debugger.print_line(&"^     end of final fallback entry ID list");
+        }
+
+        // walk ID lists and find first applicable
+        if !find_entry(&debugger, &mut xte).unwrap() {
+            exit(1)
+        }
+    }
 }
 
 fn reset_keys(xte: &mut Globals) {
@@ -271,6 +345,21 @@ See "man {self_name}" for more details."#
     );
 
     exit(0)
+}
+
+fn read_config_paths(debugger: &Box<dyn Debugger>, xte: &mut Globals) -> Result<(), ()> {
+    // Return type TBD
+    todo!()
+}
+
+fn find_entry_paths(debugger: &Box<dyn Debugger>, xte: &mut Globals) -> Result<(), ()> {
+    // Return type TBD
+    todo!()
+}
+
+fn find_entry(debugger: &Box<dyn Debugger>, xte: &mut Globals) -> Result<bool, ()> {
+    // Return type TBD
+    todo!()
 }
 
 #[cfg(test)]

@@ -18,10 +18,8 @@ use std::{
     process::{Child, Command, Stdio},
 };
 
-use crate::{debug::Debugger, env_var, os_str_concat, os_str_read_lines, os_str_strip_suffix};
+use crate::{LF, debug::Debugger, env_var, os_str_concat, os_str_read_lines, os_str_strip_suffix};
 
-const LF: &str = r#"
-"#;
 const RSEP: char = '\u{1E}';
 
 /// Struct with the data that's cached between `xdg-terminal-exec`.

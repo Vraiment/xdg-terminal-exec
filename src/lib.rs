@@ -17,6 +17,9 @@ pub mod cache;
 pub mod debug;
 pub mod testing;
 
+pub const LF: &str = r#"
+"#;
+
 /// Method to retrieve an environment variable as an optional [`OsString`].
 ///
 /// Given this program was origanlly a shell script most of the interactions
