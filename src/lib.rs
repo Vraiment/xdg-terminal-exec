@@ -359,11 +359,11 @@ where
     let string = string.as_ref();
     let bytes = string.as_bytes();
 
-    const NEW_LINE_CHARACTERS: &[u8] = &[0x20, 0x09, 0x0A];
+    const WHITESPACE_CHARACTERS: &[u8] = &[0x20, 0x09, 0x0A];
 
     let mut start = 0;
     while start < bytes.len() {
-        if !NEW_LINE_CHARACTERS.contains(&bytes[start]) {
+        if !WHITESPACE_CHARACTERS.contains(&bytes[start]) {
             break;
         }
 
@@ -372,7 +372,7 @@ where
 
     let mut end = bytes.len() - 1;
     while end >= start {
-        if !NEW_LINE_CHARACTERS.contains(&bytes[end]) {
+        if !WHITESPACE_CHARACTERS.contains(&bytes[end]) {
             break;
         }
 
