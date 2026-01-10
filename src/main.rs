@@ -12,8 +12,8 @@ use xdg_terminal_exec::{
     cache::read_cache,
     check_bool,
     debug::{Debugger, build_debugger},
-    emplace_to_csv_list, env_var, os_str_concat, os_str_remove_trailing_slash, os_str_split,
-    push_to_csv_list,
+    emplace_to_csv_list, env_var, os_str_concat, os_str_read_lines, os_str_remove_trailing_slash,
+    os_str_split, os_str_trim, push_to_csv_list,
 };
 
 #[derive(Debug)]
@@ -347,9 +347,26 @@ See "man {self_name}" for more details."#
     exit(0)
 }
 
-fn read_config_paths(debugger: &Box<dyn Debugger>, xte: &mut Globals) -> Result<(), ()> {
-    // Return type TBD
-    todo!()
+fn read_config_paths(debugger: &Box<dyn Debugger>, xte: &mut Globals) -> Result<(), io::Error> {
+    for config_path in os_str_split(&xte.configs, ':').unwrap() {
+        let config_file = Path::new(config_path);
+
+        debugger.print_line(&format!("reading config '{}'", config_path.display()));
+
+        // Nonexistant file is not an error
+        if !config_file.exists() {
+            continue;
+        }
+
+        for line in os_str_read_lines(config_file)?.map_while(Result::ok) {
+            // Originally `read` would trim leading/trailing whitespace from the line
+            match os_str_trim(&line) {
+                _ => {} // By default empty lines and comments get ignored
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn find_entry_paths(debugger: &Box<dyn Debugger>, xte: &mut Globals) -> Result<(), ()> {
@@ -367,7 +384,7 @@ mod test {
     use std::collections::HashMap;
 
     use xdg_terminal_exec::debug::build_debugger;
-    use xdg_terminal_exec::testing::with_env;
+    use xdg_terminal_exec::testing::{TempFile, with_env};
 
     use super::*;
 
@@ -591,5 +608,45 @@ mod test {
                 "Expected make_paths to fail with variable not present"
             ),
         }
+    }
+
+    #[test]
+    fn test_read_config_paths_with_empty_file_does_not_modify_any_value() {
+        let temp_file = TempFile::new().unwrap();
+        let mut xte = Globals::default();
+
+        xte.configs = OsString::from(temp_file.path());
+
+        xte.cache_enabled = OsString::from("default value for cache_enabled");
+        xte.cache_configured = OsString::from("default value for cache_configured");
+        xte.execarg_compat = OsString::from("default value for execarg_compat");
+        xte.execarg_compat_configured =
+            OsString::from("default value for execarg_compat_configured");
+        xte.execarg_defaults = OsString::from("default value for execarg_defaults");
+        xte.entry_ids = OsString::from("default value for entry_ids");
+
+        read_config_paths(&build_debugger(), &mut xte).unwrap();
+
+        assert_eq!(
+            xte.cache_enabled,
+            OsString::from("default value for cache_enabled")
+        );
+        assert_eq!(
+            xte.cache_configured,
+            OsString::from("default value for cache_configured")
+        );
+        assert_eq!(
+            xte.execarg_compat,
+            OsString::from("default value for execarg_compat")
+        );
+        assert_eq!(
+            xte.execarg_compat_configured,
+            OsString::from("default value for execarg_compat_configured")
+        );
+        assert_eq!(
+            xte.execarg_defaults,
+            OsString::from("default value for execarg_defaults")
+        );
+        assert_eq!(xte.entry_ids, OsString::from("default value for entry_ids"));
     }
 }
