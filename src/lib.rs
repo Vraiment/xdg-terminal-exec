@@ -205,7 +205,7 @@ where
 ///
 /// ```ignore
 /// use std::fs::File;
-/// use xdg_terminal_exec::os_str_split;
+/// use xdg_terminal_exec::os_str_read_lines;
 ///
 /// let file = Path::new("myfile.txt");
 ///
