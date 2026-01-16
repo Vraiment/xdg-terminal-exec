@@ -3,6 +3,8 @@ use std::{
     ffi::{OsStr, OsString},
     fmt::Display,
     io,
+    ops::Range,
+    os::unix::ffi::OsStrExt,
     path::Path,
     process::exit,
 };
@@ -15,6 +17,15 @@ use xdg_terminal_exec::{
     emplace_to_csv_list, env_var, os_str_concat, os_str_read_lines, os_str_remove_trailing_slash,
     os_str_split, os_str_starts_with, os_str_trim, push_to_csv_list,
 };
+
+const ASCII_DIGITS: Range<u8> = Range { start: 48, end: 58 }; // 0-9
+const ASCII_UPPERCASE_LETTERS: Range<u8> = Range { start: 65, end: 91 }; // A-Z
+const ASCII_LOWERCASE_LETTERS: Range<u8> = Range {
+    start: 97,
+    end: 123,
+}; // a-z
+const ASCII_UNDERSCORE: u8 = 95;
+const ASCII_DASH: u8 = 45;
 
 #[derive(Debug)]
 enum Error {
@@ -455,6 +466,68 @@ fn find_entry_paths(debugger: &Box<dyn Debugger>, xte: &mut Globals) -> Result<(
 fn find_entry(debugger: &Box<dyn Debugger>, xte: &mut Globals) -> Result<bool, ()> {
     // Return type TBD
     todo!()
+}
+
+fn validate_entry_id(debugger: &Box<dyn Debugger>, entry: &OsStr) -> bool {
+    match entry {
+        // invalid characters or degrees of emptiness
+        entry if entry_has_invalid_character(entry) || entry.is_empty() || entry == ".desktop" => {
+            // Equivalent to `format!("string not valid as Entry ID: '{entry}'")`
+            debugger.print_line(
+                &os_str_concat(&[
+                    OsStr::new("string not valid as Entry ID: '"),
+                    entry,
+                    OsStr::new("'"),
+                ])
+                .display(),
+            );
+            false
+        }
+        // all that left with .desktop
+        entry if entry_ends_with_desktop_extension(entry) => true,
+        // and without
+        entry => {
+            debugger.print_line(
+                // Equivalent to `format!("string not valid as Entry ID: '{entry}'")`
+                &os_str_concat(&[
+                    OsStr::new("string not valid as Entry ID: '"),
+                    entry,
+                    OsStr::new("'"),
+                ])
+                .display(),
+            );
+            false
+        }
+    }
+}
+
+fn entry_has_invalid_character(entry: &OsStr) -> bool {
+    const ASCII_DOT: u8 = 46;
+
+    entry.as_bytes().iter().any(|byte| {
+        !ASCII_DIGITS.contains(byte)
+            && !ASCII_UPPERCASE_LETTERS.contains(byte)
+            && !ASCII_LOWERCASE_LETTERS.contains(byte)
+            && ASCII_UNDERSCORE != *byte
+            && ASCII_DOT != *byte
+            && ASCII_DASH != *byte
+    })
+}
+
+fn entry_ends_with_desktop_extension(entry: &OsStr) -> bool {
+    const DESKTOP_EXTENSION: &'static str = ".desktop";
+
+    if entry.len() < DESKTOP_EXTENSION.len() {
+        return false;
+    }
+
+    // The following line looks a little bit esoteric but what is doing is
+    // creating a slice with the bytes where the extension would be located
+    // that way is easy to compare as a string with the actual expected
+    // extension later
+    let entry_suffix = &entry.as_bytes()[entry.len() - DESKTOP_EXTENSION.len()..];
+
+    OsStr::from_bytes(entry_suffix) == DESKTOP_EXTENSION
 }
 
 #[cfg(test)]
@@ -1021,5 +1094,143 @@ mod test {
             OsString::from("default value for execarg_defaults")
         );
         assert_eq!(xte.entry_ids, OsString::from("default value for entry_ids"));
+    }
+
+    #[test]
+    fn test_validate_entry_id_with_valid_entry() {
+        assert!(validate_entry_id(
+            &build_debugger(),
+            OsStr::new("some-entry.desktop")
+        ));
+    }
+
+    #[test]
+    fn test_validate_entry_id_with_invalid_entry_that_has_an_invalid_character_halfway() {
+        assert!(!validate_entry_id(
+            &build_debugger(),
+            OsStr::new("some-#entry.desktop")
+        ));
+    }
+
+    #[test]
+    fn test_validate_entry_id_with_invalid_entry_that_ends_with_an_invalid_character() {
+        assert!(!validate_entry_id(
+            &build_debugger(),
+            OsStr::new("some-entry.desktop#")
+        ));
+    }
+
+    #[test]
+    fn test_validate_entry_id_with_invalid_entry_that_starts_with_an_invalid_character() {
+        assert!(!validate_entry_id(
+            &build_debugger(),
+            OsStr::new("#some-entry.desktop")
+        ));
+    }
+
+    #[test]
+    fn test_validate_entry_id_with_invalid_entry_that_is_empty() {
+        assert!(!validate_entry_id(&build_debugger(), OsStr::new("")));
+    }
+
+    #[test]
+    fn test_validate_entry_id_with_invalid_entry_that_is_only_desktop_extension() {
+        assert!(!validate_entry_id(
+            &build_debugger(),
+            OsStr::new(".desktop")
+        ));
+    }
+
+    #[test]
+    fn test_validate_entry_id_with_invalid_entry_that_lacks_desktop_extension() {
+        assert!(!validate_entry_id(
+            &build_debugger(),
+            OsStr::new("some-entry")
+        ));
+    }
+
+    #[test]
+    fn test_entry_has_invalid_character_with_invalid_characters() {
+        // Test for the characters between ranges
+        const INVALID_CHARACTERS: &[char] = &[
+            '/', // character before '0'
+            ':', // character after '9'
+            '@', // character before 'A'
+            '[', // character after 'Z'
+            '`', // character before 'a'
+            '{', // character after 'z'
+        ];
+
+        for character in INVALID_CHARACTERS {
+            assert!(
+                entry_has_invalid_character(OsStr::new(&String::from(*character))),
+                "Character '{character}' is an invalid character but was considered valid"
+            );
+        }
+    }
+
+    #[test]
+    fn test_entry_has_invalid_character_with_digits() {
+        for digit in '0'..='9' {
+            assert!(
+                !entry_has_invalid_character(OsStr::new(&String::from(String::from(digit)))),
+                "Character '{digit}' is a valid character but was considered invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn test_entry_has_invalid_character_with_uppercase_letters() {
+        for letter in 'A'..='Z' {
+            assert!(
+                !entry_has_invalid_character(OsStr::new(&String::from(letter))),
+                "Character '{letter}' is a valid character but was considered invalid"
+            )
+        }
+    }
+
+    #[test]
+    fn test_entry_has_invalid_character_with_lowercase_letters() {
+        for letter in 'a'..='z' {
+            assert!(
+                !entry_has_invalid_character(OsStr::new(&String::from(letter))),
+                "Character '{letter}' is considered an invalid character but it should be valid"
+            )
+        }
+    }
+
+    #[test]
+    fn test_entry_has_invalid_character_with_valid_symbols() {
+        for symbol in ['_', '.', '-'] {
+            assert!(
+                !entry_has_invalid_character(OsStr::new(&String::from(symbol))),
+                "Character '{symbol}' is a valid character but was considered invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn test_entry_ends_with_desktop_extension_with_entry_that_ends_with_desktop_extesion() {
+        assert!(entry_ends_with_desktop_extension(OsStr::new(
+            "entry.desktop"
+        )));
+    }
+
+    #[test]
+    fn test_entry_ends_with_desktop_extension_with_entry_that_is_just_desktop_extesion() {
+        assert!(entry_ends_with_desktop_extension(OsStr::new(".desktop")));
+    }
+
+    #[test]
+    fn test_entry_ends_with_desktop_extension_with_entry_that_lacks_desktop_extension() {
+        assert!(!entry_ends_with_desktop_extension(OsStr::new("entry")));
+    }
+
+    #[test]
+    fn test_entry_ends_with_desktop_extension_with_entry_that_ends_with_desktop_extesion_but_lacks_the_dot()
+     {
+        assert!(!entry_ends_with_desktop_extension(OsStr::new(
+            "entrydesktop"
+        )));
     }
 }
