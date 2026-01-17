@@ -26,6 +26,7 @@ const ASCII_LOWERCASE_LETTERS: Range<u8> = Range {
 }; // a-z
 const ASCII_UNDERSCORE: u8 = 95;
 const ASCII_DASH: u8 = 45;
+const ASCII_COLON: u8 = 58;
 
 #[derive(Debug)]
 enum Error {
@@ -450,6 +451,40 @@ fn read_config_paths(debugger: &Box<dyn Debugger>, xte: &mut Globals) -> Result<
                     xte.execarg_compat_configured = OsString::from("1");
                 }
 
+                // default TerminalArgExec overrides
+                line if is_default_terminal_arg_exec_overrides(&line) => {
+                    if !check_bool(&xte.execarg_compat) {
+                        debugger.print_line(&format!(
+                            "ignored directive '{}' (strict mode)",
+                            line.display()
+                        ));
+                        continue;
+                    }
+
+                    let (entry_id, execarg_default) =
+                        split_default_terminal_arg_exec_overrides(&line);
+                    if validate_entry_id(debugger, entry_id) {
+                        debugger.print_line(&format!(
+                            "added TerminalArgExec default '{}' for '{}'",
+                            execarg_default.display(),
+                            entry_id.display()
+                        ));
+
+                        // do not bother with deduplication, first entry ID will win
+                        let mut entry = Vec::<&OsStr>::new();
+                        if !xte.execarg_defaults.is_empty() {
+                            entry.push(&xte.execarg_defaults);
+                            entry.push(OsStr::new(LF));
+                        }
+
+                        entry.push(entry_id);
+                        entry.push(OsStr::new(":"));
+                        entry.push(execarg_default);
+
+                        xte.execarg_defaults = os_str_concat(&entry);
+                    }
+                }
+
                 _ => {} // By default empty lines and comments get ignored
             }
         }
@@ -528,6 +563,41 @@ fn entry_ends_with_desktop_extension(entry: &OsStr) -> bool {
     let entry_suffix = &entry.as_bytes()[entry.len() - DESKTOP_EXTENSION.len()..];
 
     OsStr::from_bytes(entry_suffix) == DESKTOP_EXTENSION
+}
+
+fn is_default_terminal_arg_exec_overrides(entry: &OsStr) -> bool {
+    const PREFIX: &'static str = "/execarg_default:";
+    if !os_str_starts_with(entry, PREFIX) {
+        return false;
+    }
+
+    entry.as_bytes()[PREFIX.len()..] // substring after `PREFIX`
+        .iter()
+        .any(|byte| *byte == ASCII_COLON)
+}
+
+fn split_default_terminal_arg_exec_overrides(entry: &OsStr) -> (&OsStr, &OsStr) {
+    let entry_bytes = entry.as_bytes();
+
+    let mut first_colon: Option<usize> = None;
+    let mut second_colon: Option<usize> = None;
+    for (n, byte) in entry_bytes.iter().enumerate() {
+        if *byte == ASCII_COLON {
+            if first_colon.is_none() {
+                first_colon = Some(n);
+            } else {
+                second_colon = Some(n);
+                break;
+            }
+        }
+    }
+
+    let first_colon = first_colon.expect("There should be at least one colon on the entry");
+    let second_colon = second_colon.expect("There should be at least two colons on the entry");
+    let entry_id: &OsStr = OsStr::from_bytes(&entry_bytes[first_colon + 1..second_colon]);
+    let execarg_default = OsStr::from_bytes(&entry_bytes[second_colon + 1..]);
+
+    (entry_id, execarg_default)
 }
 
 #[cfg(test)]
@@ -1232,5 +1302,255 @@ mod test {
         assert!(!entry_ends_with_desktop_extension(OsStr::new(
             "entrydesktop"
         )));
+    }
+
+    #[test]
+    fn test_read_config_paths_with_file_that_enables_execarg_compat_and_has_a_valid_override() {
+        let temp_file = TempFile::new().unwrap();
+        let mut xte = Globals::default();
+
+        fs::write(
+            &temp_file.path(),
+            "/execarg_compat\n\
+            /execarg_default:entry.desktop:value",
+        )
+        .unwrap();
+
+        xte.configs = OsString::from(temp_file.path());
+
+        xte.cache_enabled = OsString::from("default value for cache_enabled");
+        xte.cache_configured = OsString::from("default value for cache_configured");
+        xte.execarg_compat = OsString::from("default value for execarg_compat");
+        xte.execarg_compat_configured = OsString::from(""); // Needs to be unset
+        xte.execarg_defaults = OsString::from(""); // Needs to be unset
+        xte.entry_ids = OsString::from("default value for entry_ids");
+
+        read_config_paths(&build_debugger(), &mut xte).unwrap();
+
+        assert_eq!(
+            xte.cache_enabled,
+            OsString::from("default value for cache_enabled")
+        );
+        assert_eq!(
+            xte.cache_configured,
+            OsString::from("default value for cache_configured")
+        );
+        assert_eq!(xte.execarg_compat, OsString::from("true"));
+        assert_eq!(xte.execarg_compat_configured, OsString::from("1"));
+        assert_eq!(xte.execarg_defaults, OsString::from("entry.desktop:value"));
+        assert_eq!(xte.entry_ids, OsString::from("default value for entry_ids"));
+    }
+
+    #[test]
+    fn test_read_config_paths_with_file_that_enables_execarg_compat_and_has_a_valid_override_with_colons_in_the_value()
+     {
+        let temp_file = TempFile::new().unwrap();
+        let mut xte = Globals::default();
+
+        fs::write(
+            &temp_file.path(),
+            "/execarg_compat\n\
+            /execarg_default:entry.desktop:value:with:colons",
+        )
+        .unwrap();
+
+        xte.configs = OsString::from(temp_file.path());
+
+        xte.cache_enabled = OsString::from("default value for cache_enabled");
+        xte.cache_configured = OsString::from("default value for cache_configured");
+        xte.execarg_compat = OsString::from("default value for execarg_compat");
+        xte.execarg_compat_configured = OsString::from(""); // Needs to be unset
+        xte.execarg_defaults = OsString::from(""); // Needs to be unset
+        xte.entry_ids = OsString::from("default value for entry_ids");
+
+        read_config_paths(&build_debugger(), &mut xte).unwrap();
+
+        assert_eq!(
+            xte.cache_enabled,
+            OsString::from("default value for cache_enabled")
+        );
+        assert_eq!(
+            xte.cache_configured,
+            OsString::from("default value for cache_configured")
+        );
+        assert_eq!(xte.execarg_compat, OsString::from("true"));
+        assert_eq!(xte.execarg_compat_configured, OsString::from("1"));
+        assert_eq!(
+            xte.execarg_defaults,
+            OsString::from("entry.desktop:value:with:colons")
+        );
+        assert_eq!(xte.entry_ids, OsString::from("default value for entry_ids"));
+    }
+
+    #[test]
+    fn test_read_config_paths_with_file_that_enables_execarg_compat_and_has_a_multiple_overrides() {
+        let temp_file = TempFile::new().unwrap();
+        let mut xte = Globals::default();
+
+        fs::write(
+            &temp_file.path(),
+            "/execarg_compat\n\
+            /execarg_default:entry1.desktop:value1\n\
+            /execarg_default:entry2.desktop:value2",
+        )
+        .unwrap();
+
+        xte.configs = OsString::from(temp_file.path());
+
+        xte.cache_enabled = OsString::from("default value for cache_enabled");
+        xte.cache_configured = OsString::from("default value for cache_configured");
+        xte.execarg_compat = OsString::from("default value for execarg_compat");
+        xte.execarg_compat_configured = OsString::from(""); // Needs to be unset
+        xte.execarg_defaults = OsString::from(""); // Needs to be unset
+        xte.entry_ids = OsString::from("default value for entry_ids");
+
+        read_config_paths(&build_debugger(), &mut xte).unwrap();
+
+        assert_eq!(
+            xte.cache_enabled,
+            OsString::from("default value for cache_enabled")
+        );
+        assert_eq!(
+            xte.cache_configured,
+            OsString::from("default value for cache_configured")
+        );
+        assert_eq!(xte.execarg_compat, OsString::from("true"));
+        assert_eq!(xte.execarg_compat_configured, OsString::from("1"));
+        assert_eq!(
+            xte.execarg_defaults,
+            OsString::from(format!("entry1.desktop:value1{LF}entry2.desktop:value2"))
+        );
+        assert_eq!(xte.entry_ids, OsString::from("default value for entry_ids"));
+    }
+
+    #[test]
+    fn test_read_config_paths_with_file_that_disables_execarg_compat_and_has_a_valid_override() {
+        let temp_file = TempFile::new().unwrap();
+        let mut xte = Globals::default();
+
+        fs::write(
+            &temp_file.path(),
+            "/execarg_strict\n\
+            /execarg_default:entry.desktop:value",
+        )
+        .unwrap();
+
+        xte.configs = OsString::from(temp_file.path());
+
+        xte.cache_enabled = OsString::from("default value for cache_enabled");
+        xte.cache_configured = OsString::from("default value for cache_configured");
+        xte.execarg_compat = OsString::from("default value for execarg_compat");
+        xte.execarg_compat_configured = OsString::from(""); // Needs to be unset
+        xte.execarg_defaults = OsString::from("default value for execarg_defaults"); // Needs to be unset
+        xte.entry_ids = OsString::from("default value for entry_ids");
+
+        read_config_paths(&build_debugger(), &mut xte).unwrap();
+
+        assert_eq!(
+            xte.cache_enabled,
+            OsString::from("default value for cache_enabled")
+        );
+        assert_eq!(
+            xte.cache_configured,
+            OsString::from("default value for cache_configured")
+        );
+        assert_eq!(xte.execarg_compat, OsString::from("false"));
+        assert_eq!(xte.execarg_compat_configured, OsString::from("1"));
+        assert_eq!(
+            xte.execarg_defaults,
+            OsString::from("default value for execarg_defaults")
+        );
+        assert_eq!(xte.entry_ids, OsString::from("default value for entry_ids"));
+    }
+
+    #[test]
+    fn test_read_config_paths_with_file_that_enables_execarg_compat_and_has_a_valid_override_with_whitespaces()
+     {
+        let temp_file = TempFile::new().unwrap();
+        let mut xte = Globals::default();
+
+        fs::write(
+            &temp_file.path(),
+            "/execarg_compat\n\
+            \t\t\t/execarg_default:entry.desktop:value    ",
+        )
+        .unwrap();
+
+        xte.configs = OsString::from(temp_file.path());
+
+        xte.cache_enabled = OsString::from("default value for cache_enabled");
+        xte.cache_configured = OsString::from("default value for cache_configured");
+        xte.execarg_compat = OsString::from("default value for execarg_compat");
+        xte.execarg_compat_configured = OsString::from(""); // Needs to be unset
+        xte.execarg_defaults = OsString::from(""); // Needs to be unset
+        xte.entry_ids = OsString::from("default value for entry_ids");
+
+        read_config_paths(&build_debugger(), &mut xte).unwrap();
+
+        assert_eq!(
+            xte.cache_enabled,
+            OsString::from("default value for cache_enabled")
+        );
+        assert_eq!(
+            xte.cache_configured,
+            OsString::from("default value for cache_configured")
+        );
+        assert_eq!(xte.execarg_compat, OsString::from("true"));
+        assert_eq!(xte.execarg_compat_configured, OsString::from("1"));
+        assert_eq!(xte.execarg_defaults, OsString::from("entry.desktop:value"));
+        assert_eq!(xte.entry_ids, OsString::from("default value for entry_ids"));
+    }
+
+    #[test]
+    fn test_is_default_terminal_arg_exec_overrides_when_is_valid() {
+        assert!(is_default_terminal_arg_exec_overrides(OsStr::new(
+            "/execarg_default:value:"
+        )));
+    }
+
+    #[test]
+    fn test_is_default_terminal_arg_exec_overrides_when_is_valid_with_multiple_colons() {
+        assert!(is_default_terminal_arg_exec_overrides(OsStr::new(
+            "/execarg_default:value:value:"
+        )));
+    }
+
+    #[test]
+    fn test_is_default_terminal_arg_exec_overrides_when_is_valid_with_no_entry_id() {
+        assert!(is_default_terminal_arg_exec_overrides(OsStr::new(
+            "/execarg_default::value:"
+        )));
+    }
+
+    #[test]
+    fn test_is_default_terminal_arg_exec_overrides_when_is_not_valid_due_missing_the_prefix() {
+        assert!(!is_default_terminal_arg_exec_overrides(OsStr::new(
+            "execarg_default:value:"
+        )));
+    }
+
+    #[test]
+    fn test_is_default_terminal_arg_exec_overrides_when_is_not_valid_due_missing_another_colon() {
+        assert!(!is_default_terminal_arg_exec_overrides(OsStr::new(
+            "/execarg_default:value"
+        )));
+    }
+
+    #[test]
+    fn test_split_default_terminal_arg_exec_overrides() {
+        assert_eq!(
+            split_default_terminal_arg_exec_overrides(OsStr::new("/execarg_default:entry:value")),
+            (OsStr::new("entry"), OsStr::new("value"))
+        );
+    }
+
+    #[test]
+    fn test_split_default_terminal_arg_exec_overrides_when_it_has_multiple_colons() {
+        assert_eq!(
+            split_default_terminal_arg_exec_overrides(OsStr::new(
+                "/execarg_default:entry:value:with:colons"
+            )),
+            (OsStr::new("entry"), OsStr::new("value:with:colons"))
+        );
     }
 }
