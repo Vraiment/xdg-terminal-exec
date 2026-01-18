@@ -15,7 +15,7 @@ use xdg_terminal_exec::{
     check_bool,
     debug::{Debugger, build_debugger},
     emplace_to_csv_list, env_var, os_str_concat, os_str_read_lines, os_str_remove_trailing_slash,
-    os_str_split, os_str_starts_with, os_str_trim, push_to_csv_list,
+    os_str_split, os_str_starts_with, os_str_strip_suffix, os_str_trim, push_to_csv_list,
 };
 
 const ASCII_DIGITS: Range<u8> = Range { start: 48, end: 58 }; // 0-9
@@ -27,6 +27,8 @@ const ASCII_LOWERCASE_LETTERS: Range<u8> = Range {
 const ASCII_UNDERSCORE: u8 = 95;
 const ASCII_DASH: u8 = 45;
 const ASCII_COLON: u8 = 58;
+const ASCII_PLUS_SIGN: u8 = 43;
+const ASCII_MINUS_SIGN: u8 = 45;
 
 #[derive(Debug)]
 enum Error {
@@ -485,6 +487,56 @@ fn read_config_paths(debugger: &Box<dyn Debugger>, xte: &mut Globals) -> Result<
                     }
                 }
 
+                line if is_potential_entry(&line) => {
+                    let line_without_exclusion: &OsStr;
+                    let exclusion: &OsStr;
+                    match line.as_bytes() {
+                        [ASCII_PLUS_SIGN, ..] | [ASCII_MINUS_SIGN, ..] => {
+                            let line_bytes = (&line).as_bytes();
+                            // save and cut exclusion marker
+                            let _line = OsStr::from_bytes(&line_bytes[1..]);
+                            exclusion = os_str_strip_suffix(&line, _line).unwrap();
+                            line_without_exclusion = _line;
+                        }
+                        _ => {
+                            exclusion = OsStr::new("");
+                            line_without_exclusion = &line;
+                        }
+                    }
+
+                    // consider only the first ':' as a delimiter
+                    let (entry_id, action_id) =
+                        split_entry_id_and_action_id(&line_without_exclusion);
+                    if validate_entry_id(&debugger, &entry_id)
+                        && validate_action_id(&debugger, &action_id)
+                    {
+                        match exclusion {
+                            _ if exclusion.is_empty() => {
+                                xte.entry_ids = if !xte.entry_ids.is_empty() {
+                                    os_str_concat(&[
+                                        xte.entry_ids.as_os_str(),
+                                        OsStr::new(LF),
+                                        line,
+                                    ])
+                                } else {
+                                    line.to_os_string()
+                                };
+                                debugger.print_line(&format!(
+                                    "added entry ID with action ID '{}'",
+                                    line.display()
+                                ));
+                            }
+                            _ if exclusion == OsStr::from_bytes(&[ASCII_PLUS_SIGN]) => {
+                                todo!()
+                            }
+                            _ if exclusion == OsStr::from_bytes(&[ASCII_MINUS_SIGN]) => {
+                                todo!()
+                            }
+                            _ => panic!("This branch should never happen"),
+                        }
+                    }
+                }
+
                 _ => {} // By default empty lines and comments get ignored
             }
         }
@@ -598,6 +650,75 @@ fn split_default_terminal_arg_exec_overrides(entry: &OsStr) -> (&OsStr, &OsStr) 
     let execarg_default = OsStr::from_bytes(&entry_bytes[second_colon + 1..]);
 
     (entry_id, execarg_default)
+}
+
+// Should match `/bin/sh`'s regex: `[a-zA-Z0-9_]* | [+-][a-zA-Z0-9_]*`
+fn is_potential_entry(entry: &OsStr) -> bool {
+    let entry_bytes = entry.as_bytes();
+
+    if entry_bytes.is_empty() {
+        return false;
+    }
+
+    let first_byte = if entry_bytes[0] == ASCII_PLUS_SIGN || entry_bytes[0] == ASCII_MINUS_SIGN {
+        // Skip first byte if is `+` or `-` and there's more characters
+        if entry_bytes.len() > 1 {
+            entry_bytes[1]
+        } else {
+            return false;
+        }
+    } else {
+        entry_bytes[0]
+    };
+
+    ASCII_LOWERCASE_LETTERS.contains(&first_byte)
+        || ASCII_UPPERCASE_LETTERS.contains(&first_byte)
+        || ASCII_DIGITS.contains(&first_byte)
+        || ASCII_UNDERSCORE == first_byte
+}
+
+fn validate_action_id(debugger: &Box<dyn Debugger>, action: &OsStr) -> bool {
+    match action {
+        // empty is ok
+        _ if action.is_empty() => true,
+        // invalid characters
+        _ if !action.as_bytes().iter().all(|byte| {
+            ASCII_DIGITS.contains(byte)
+                || ASCII_UPPERCASE_LETTERS.contains(byte)
+                || ASCII_LOWERCASE_LETTERS.contains(byte)
+                || ASCII_DASH == *byte
+        }) =>
+        {
+            debugger.print_line(
+                // Equivalent to `format!("string not valid as Action ID: '{action}'")`
+                &os_str_concat(&[
+                    OsStr::new("string not valid as Action ID: '"),
+                    action,
+                    OsStr::new("'"),
+                ])
+                .display(),
+            );
+
+            false
+        }
+        // all that left
+        _ => true,
+    }
+}
+
+fn split_entry_id_and_action_id(entry: &OsStr) -> (&OsStr, &OsStr) {
+    let entry_bytes = entry.as_bytes();
+
+    for (n, byte) in entry_bytes.iter().enumerate() {
+        if *byte == ASCII_COLON {
+            let entry_id = OsStr::from_bytes(&entry_bytes[..n]);
+            let action_id = OsStr::from_bytes(&entry_bytes[n + 1..]);
+
+            return (entry_id, action_id);
+        }
+    }
+
+    (entry, OsStr::new(""))
 }
 
 #[cfg(test)]
@@ -1502,6 +1623,274 @@ mod test {
     }
 
     #[test]
+    fn test_read_config_paths_with_an_entry_without_action() {
+        let temp_file = TempFile::new().unwrap();
+        let mut xte = Globals::default();
+
+        fs::write(&temp_file.path(), "entry_id.desktop").unwrap();
+
+        xte.configs = OsString::from(temp_file.path());
+
+        xte.cache_enabled = OsString::from("default value for cache_enabled");
+        xte.cache_configured = OsString::from("default value for cache_configured");
+        xte.execarg_compat = OsString::from("default value for execarg_compat");
+        xte.execarg_compat_configured =
+            OsString::from("default value for execarg_compat_configured");
+        xte.execarg_defaults = OsString::from("default value for execarg_defaults");
+        xte.entry_ids = OsString::from(""); // Needs to be unset
+        xte.included_entry_ids = OsString::from("default value for included_entry_ids");
+        xte.excluded_entry_ids = OsString::from("default value for excluded_entry_ids");
+
+        read_config_paths(&build_debugger(), &mut xte).unwrap();
+
+        assert_eq!(
+            xte.cache_enabled,
+            OsString::from("default value for cache_enabled")
+        );
+        assert_eq!(
+            xte.cache_configured,
+            OsString::from("default value for cache_configured")
+        );
+        assert_eq!(
+            xte.execarg_compat,
+            OsString::from("default value for execarg_compat")
+        );
+        assert_eq!(
+            xte.execarg_compat_configured,
+            OsString::from("default value for execarg_compat_configured")
+        );
+        assert_eq!(
+            xte.execarg_defaults,
+            OsString::from("default value for execarg_defaults")
+        );
+        assert_eq!(xte.entry_ids, OsString::from("entry_id.desktop"));
+        assert_eq!(
+            xte.included_entry_ids,
+            OsString::from("default value for included_entry_ids")
+        );
+        assert_eq!(
+            xte.excluded_entry_ids,
+            OsString::from("default value for excluded_entry_ids")
+        );
+    }
+
+    #[test]
+    fn test_read_config_paths_with_an_entry_without_action_with_whitespaces() {
+        let temp_file = TempFile::new().unwrap();
+        let mut xte = Globals::default();
+
+        fs::write(&temp_file.path(), " \t \t entry_id.desktop\t \t ").unwrap();
+
+        xte.configs = OsString::from(temp_file.path());
+
+        xte.cache_enabled = OsString::from("default value for cache_enabled");
+        xte.cache_configured = OsString::from("default value for cache_configured");
+        xte.execarg_compat = OsString::from("default value for execarg_compat");
+        xte.execarg_compat_configured =
+            OsString::from("default value for execarg_compat_configured");
+        xte.execarg_defaults = OsString::from("default value for execarg_defaults");
+        xte.entry_ids = OsString::from(""); // Needs to be unset
+        xte.included_entry_ids = OsString::from("default value for included_entry_ids");
+        xte.excluded_entry_ids = OsString::from("default value for excluded_entry_ids");
+
+        read_config_paths(&build_debugger(), &mut xte).unwrap();
+
+        assert_eq!(
+            xte.cache_enabled,
+            OsString::from("default value for cache_enabled")
+        );
+        assert_eq!(
+            xte.cache_configured,
+            OsString::from("default value for cache_configured")
+        );
+        assert_eq!(
+            xte.execarg_compat,
+            OsString::from("default value for execarg_compat")
+        );
+        assert_eq!(
+            xte.execarg_compat_configured,
+            OsString::from("default value for execarg_compat_configured")
+        );
+        assert_eq!(
+            xte.execarg_defaults,
+            OsString::from("default value for execarg_defaults")
+        );
+        assert_eq!(xte.entry_ids, OsString::from("entry_id.desktop"));
+        assert_eq!(
+            xte.included_entry_ids,
+            OsString::from("default value for included_entry_ids")
+        );
+        assert_eq!(
+            xte.excluded_entry_ids,
+            OsString::from("default value for excluded_entry_ids")
+        );
+    }
+
+    #[test]
+    fn test_read_config_paths_with_an_entry_with_valid_action() {
+        let temp_file = TempFile::new().unwrap();
+        let mut xte = Globals::default();
+
+        fs::write(&temp_file.path(), "entry_id.desktop:action").unwrap();
+
+        xte.configs = OsString::from(temp_file.path());
+
+        xte.cache_enabled = OsString::from("default value for cache_enabled");
+        xte.cache_configured = OsString::from("default value for cache_configured");
+        xte.execarg_compat = OsString::from("default value for execarg_compat");
+        xte.execarg_compat_configured =
+            OsString::from("default value for execarg_compat_configured");
+        xte.execarg_defaults = OsString::from("default value for execarg_defaults");
+        xte.entry_ids = OsString::from(""); // Needs to be unset
+        xte.included_entry_ids = OsString::from("default value for included_entry_ids");
+        xte.excluded_entry_ids = OsString::from("default value for excluded_entry_ids");
+
+        read_config_paths(&build_debugger(), &mut xte).unwrap();
+
+        assert_eq!(
+            xte.cache_enabled,
+            OsString::from("default value for cache_enabled")
+        );
+        assert_eq!(
+            xte.cache_configured,
+            OsString::from("default value for cache_configured")
+        );
+        assert_eq!(
+            xte.execarg_compat,
+            OsString::from("default value for execarg_compat")
+        );
+        assert_eq!(
+            xte.execarg_compat_configured,
+            OsString::from("default value for execarg_compat_configured")
+        );
+        assert_eq!(
+            xte.execarg_defaults,
+            OsString::from("default value for execarg_defaults")
+        );
+        assert_eq!(xte.entry_ids, OsString::from("entry_id.desktop:action"));
+        assert_eq!(
+            xte.included_entry_ids,
+            OsString::from("default value for included_entry_ids")
+        );
+        assert_eq!(
+            xte.excluded_entry_ids,
+            OsString::from("default value for excluded_entry_ids")
+        );
+    }
+
+    #[test]
+    fn test_read_config_paths_with_an_entry_with_invalid_action() {
+        let temp_file = TempFile::new().unwrap();
+        let mut xte = Globals::default();
+
+        fs::write(&temp_file.path(), "entry_id.desktop:act*ion").unwrap();
+
+        xte.configs = OsString::from(temp_file.path());
+
+        xte.cache_enabled = OsString::from("default value for cache_enabled");
+        xte.cache_configured = OsString::from("default value for cache_configured");
+        xte.execarg_compat = OsString::from("default value for execarg_compat");
+        xte.execarg_compat_configured =
+            OsString::from("default value for execarg_compat_configured");
+        xte.execarg_defaults = OsString::from("default value for execarg_defaults");
+        xte.entry_ids = OsString::from("default value for entry_ids");
+        xte.included_entry_ids = OsString::from("default value for included_entry_ids");
+        xte.excluded_entry_ids = OsString::from("default value for excluded_entry_ids");
+
+        read_config_paths(&build_debugger(), &mut xte).unwrap();
+
+        assert_eq!(
+            xte.cache_enabled,
+            OsString::from("default value for cache_enabled")
+        );
+        assert_eq!(
+            xte.cache_configured,
+            OsString::from("default value for cache_configured")
+        );
+        assert_eq!(
+            xte.execarg_compat,
+            OsString::from("default value for execarg_compat")
+        );
+        assert_eq!(
+            xte.execarg_compat_configured,
+            OsString::from("default value for execarg_compat_configured")
+        );
+        assert_eq!(
+            xte.execarg_defaults,
+            OsString::from("default value for execarg_defaults")
+        );
+        assert_eq!(xte.entry_ids, OsString::from("default value for entry_ids"));
+        assert_eq!(
+            xte.included_entry_ids,
+            OsString::from("default value for included_entry_ids")
+        );
+        assert_eq!(
+            xte.excluded_entry_ids,
+            OsString::from("default value for excluded_entry_ids")
+        );
+    }
+
+    #[test]
+    fn test_read_config_paths_with_multiple_valid_entries() {
+        let temp_file = TempFile::new().unwrap();
+        let mut xte = Globals::default();
+
+        fs::write(
+            &temp_file.path(),
+            "entry1.desktop:value1\n\
+            entry2.desktop:value2",
+        )
+        .unwrap();
+
+        xte.configs = OsString::from(temp_file.path());
+
+        xte.cache_enabled = OsString::from("default value for cache_enabled");
+        xte.cache_configured = OsString::from("default value for cache_configured");
+        xte.execarg_compat = OsString::from("default value for execarg_compat");
+        xte.execarg_compat_configured =
+            OsString::from("default value for execarg_compat_configured");
+        xte.execarg_defaults = OsString::from("default value for execarg_defaults");
+        xte.entry_ids = OsString::from(""); // Needs to be unset
+        xte.included_entry_ids = OsString::from("default value for included_entry_ids");
+        xte.excluded_entry_ids = OsString::from("default value for excluded_entry_ids");
+
+        read_config_paths(&build_debugger(), &mut xte).unwrap();
+
+        assert_eq!(
+            xte.cache_enabled,
+            OsString::from("default value for cache_enabled")
+        );
+        assert_eq!(
+            xte.cache_configured,
+            OsString::from("default value for cache_configured")
+        );
+        assert_eq!(
+            xte.execarg_compat,
+            OsString::from("default value for execarg_compat")
+        );
+        assert_eq!(
+            xte.execarg_compat_configured,
+            OsString::from("default value for execarg_compat_configured")
+        );
+        assert_eq!(
+            xte.execarg_defaults,
+            OsString::from("default value for execarg_defaults")
+        );
+        assert_eq!(
+            xte.entry_ids,
+            OsString::from(format!("entry1.desktop:value1{LF}entry2.desktop:value2"))
+        );
+        assert_eq!(
+            xte.included_entry_ids,
+            OsString::from("default value for included_entry_ids")
+        );
+        assert_eq!(
+            xte.excluded_entry_ids,
+            OsString::from("default value for excluded_entry_ids")
+        );
+    }
+
+    #[test]
     fn test_is_default_terminal_arg_exec_overrides_when_is_valid() {
         assert!(is_default_terminal_arg_exec_overrides(OsStr::new(
             "/execarg_default:value:"
@@ -1551,6 +1940,125 @@ mod test {
                 "/execarg_default:entry:value:with:colons"
             )),
             (OsStr::new("entry"), OsStr::new("value:with:colons"))
+        );
+    }
+
+    #[test]
+    fn test_is_potential_entry_that_starts_with_lowercase() {
+        assert!(is_potential_entry(OsStr::new("a:")));
+    }
+
+    #[test]
+    fn test_is_potential_entry_that_starts_with_uppercase() {
+        assert!(is_potential_entry(OsStr::new("A:")));
+    }
+
+    #[test]
+    fn test_is_potential_entry_that_starts_with_digit() {
+        assert!(is_potential_entry(OsStr::new("0:")));
+    }
+
+    #[test]
+    fn test_is_potential_entry_that_starts_with_underscore() {
+        assert!(is_potential_entry(OsStr::new("_:")));
+    }
+
+    #[test]
+    fn test_is_potential_entry_that_starts_with_plus() {
+        assert!(is_potential_entry(OsStr::new("+a:")));
+    }
+
+    #[test]
+    fn test_is_potential_entry_that_starts_with_minus() {
+        assert!(is_potential_entry(OsStr::new("-a:")));
+    }
+
+    #[test]
+    fn test_is_potential_entry_with_an_empty_string() {
+        assert!(!is_potential_entry(OsStr::new("")));
+    }
+
+    #[test]
+    fn test_is_potential_entry_that_starts_with_invalid_character() {
+        assert!(!is_potential_entry(OsStr::new("*asdf")));
+    }
+
+    #[test]
+    fn test_is_potential_entry_that_starts_with_two_plus() {
+        assert!(!is_potential_entry(OsStr::new("++asdf")));
+    }
+
+    #[test]
+    fn test_validate_action_id_with_empty_string() {
+        assert!(validate_action_id(&build_debugger(), OsStr::new("")));
+    }
+
+    #[test]
+    fn test_validate_action_id_with_valid_characters() {
+        assert!(validate_action_id(
+            &build_debugger(),
+            OsStr::new("abcABC123-")
+        ));
+    }
+
+    #[test]
+    fn test_validate_action_id_with_invalid_character_at_the_beginning() {
+        assert!(!validate_action_id(
+            &build_debugger(),
+            OsStr::new("#abcABC123-")
+        ));
+    }
+
+    #[test]
+    fn test_validate_action_id_with_invalid_character_at_the_middle() {
+        assert!(!validate_action_id(
+            &build_debugger(),
+            OsStr::new("abcAB#C123-")
+        ));
+    }
+
+    #[test]
+    fn test_validate_action_id_with_invalid_character_at_the_end() {
+        assert!(!validate_action_id(
+            &build_debugger(),
+            OsStr::new("abcABC123-#")
+        ));
+    }
+
+    #[test]
+    fn test_validate_action_id_with_only_invalid_character() {
+        assert!(!validate_action_id(&build_debugger(), OsStr::new("#")));
+    }
+
+    #[test]
+    fn test_split_entry_id_and_action_id() {
+        assert_eq!(
+            split_entry_id_and_action_id(OsStr::new("entry_id:action_id")),
+            (OsStr::new("entry_id"), OsStr::new("action_id"))
+        );
+    }
+
+    #[test]
+    fn test_split_entry_id_and_action_id_with_multiple_colons() {
+        assert_eq!(
+            split_entry_id_and_action_id(OsStr::new("entry_id:value1:value2")),
+            (OsStr::new("entry_id"), OsStr::new("value1:value2"))
+        );
+    }
+
+    #[test]
+    fn test_split_entry_id_and_action_id_without_colons() {
+        assert_eq!(
+            split_entry_id_and_action_id(OsStr::new("entry_id")),
+            (OsStr::new("entry_id"), OsStr::new(""))
+        );
+    }
+
+    #[test]
+    fn test_split_entry_id_and_action_id_with_colon_at_the_end() {
+        assert_eq!(
+            split_entry_id_and_action_id(OsStr::new("entry_id:")),
+            (OsStr::new("entry_id"), OsStr::new(""))
         );
     }
 }
