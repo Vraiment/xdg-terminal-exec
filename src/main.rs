@@ -553,7 +553,30 @@ fn read_config_paths(debugger: &Box<dyn Debugger>, xte: &mut Globals) -> Result<
                                 }
                             }
                             _ if exclusion == OsStr::from_bytes(&[ASCII_MINUS_SIGN]) => {
-                                todo!()
+                                if list_contains(&xte.included_entry_ids, entry_id, None) {
+                                    debugger.print_line(&format!(
+                                        "entry '{}' fallback exclusion was already prevented",
+                                        entry_id.display()
+                                    ));
+                                } else if list_contains(&xte.excluded_entry_ids, entry_id, None) {
+                                    debugger.print_line(&format!(
+                                        "entry '{}' was already excluded from fallback",
+                                        entry_id.display()
+                                    ));
+                                } else {
+                                    debugger.print_line(&format!(
+                                        "excluding entry '{}' from fallback",
+                                        entry_id.display()
+                                    ));
+                                    xte.excluded_entry_ids = if !xte.excluded_entry_ids.is_empty() {
+                                        os_str_concat(&[
+                                            xte.excluded_entry_ids.as_os_str(),
+                                            OsStr::new(LF),
+                                        ])
+                                    } else {
+                                        entry_id.to_os_string()
+                                    };
+                                }
                             }
                             _ => panic!("This branch should never happen"),
                         }
@@ -2196,6 +2219,251 @@ mod test {
             xte.excluded_entry_ids,
             OsString::from("default value for excluded_entry_ids")
         );
+    }
+
+    #[test]
+    fn test_read_config_paths_with_an_excluded_entry_without_action() {
+        let temp_file = TempFile::new().unwrap();
+        let mut xte = Globals::default();
+
+        fs::write(&temp_file.path(), "-entry_id.desktop").unwrap();
+
+        xte.configs = OsString::from(temp_file.path());
+
+        xte.cache_enabled = OsString::from("default value for cache_enabled");
+        xte.cache_configured = OsString::from("default value for cache_configured");
+        xte.execarg_compat = OsString::from("default value for execarg_compat");
+        xte.execarg_compat_configured =
+            OsString::from("default value for execarg_compat_configured");
+        xte.execarg_defaults = OsString::from("default value for execarg_defaults");
+        xte.entry_ids = OsString::from("default value for entry_ids");
+        xte.included_entry_ids = OsString::from("default value for included_entry_ids");
+        xte.excluded_entry_ids = OsString::from(""); // Needs to be unset
+
+        read_config_paths(&build_debugger(), &mut xte).unwrap();
+
+        assert_eq!(
+            xte.cache_enabled,
+            OsString::from("default value for cache_enabled")
+        );
+        assert_eq!(
+            xte.cache_configured,
+            OsString::from("default value for cache_configured")
+        );
+        assert_eq!(
+            xte.execarg_compat,
+            OsString::from("default value for execarg_compat")
+        );
+        assert_eq!(
+            xte.execarg_compat_configured,
+            OsString::from("default value for execarg_compat_configured")
+        );
+        assert_eq!(
+            xte.execarg_defaults,
+            OsString::from("default value for execarg_defaults")
+        );
+        assert_eq!(xte.entry_ids, OsString::from("default value for entry_ids"));
+        assert_eq!(
+            xte.included_entry_ids,
+            OsString::from("default value for included_entry_ids")
+        );
+        assert_eq!(xte.excluded_entry_ids, OsString::from("entry_id.desktop"));
+    }
+
+    #[test]
+    fn test_read_config_paths_with_an_excluded_entry_with_action() {
+        let temp_file = TempFile::new().unwrap();
+        let mut xte = Globals::default();
+
+        fs::write(&temp_file.path(), "-entry_id.desktop:action").unwrap();
+
+        xte.configs = OsString::from(temp_file.path());
+
+        xte.cache_enabled = OsString::from("default value for cache_enabled");
+        xte.cache_configured = OsString::from("default value for cache_configured");
+        xte.execarg_compat = OsString::from("default value for execarg_compat");
+        xte.execarg_compat_configured =
+            OsString::from("default value for execarg_compat_configured");
+        xte.execarg_defaults = OsString::from("default value for execarg_defaults");
+        xte.entry_ids = OsString::from("default value for entry_ids");
+        xte.included_entry_ids = OsString::from("default value for included_entry_ids");
+        xte.excluded_entry_ids = OsString::from(""); // Needs to be unset
+
+        read_config_paths(&build_debugger(), &mut xte).unwrap();
+
+        assert_eq!(
+            xte.cache_enabled,
+            OsString::from("default value for cache_enabled")
+        );
+        assert_eq!(
+            xte.cache_configured,
+            OsString::from("default value for cache_configured")
+        );
+        assert_eq!(
+            xte.execarg_compat,
+            OsString::from("default value for execarg_compat")
+        );
+        assert_eq!(
+            xte.execarg_compat_configured,
+            OsString::from("default value for execarg_compat_configured")
+        );
+        assert_eq!(
+            xte.execarg_defaults,
+            OsString::from("default value for execarg_defaults")
+        );
+        assert_eq!(xte.entry_ids, OsString::from("default value for entry_ids"));
+        assert_eq!(
+            xte.included_entry_ids,
+            OsString::from("default value for included_entry_ids")
+        );
+        assert_eq!(xte.excluded_entry_ids, OsString::from("entry_id.desktop"));
+    }
+
+    #[test]
+    fn test_read_config_paths_with_an_excluded_entry_without_action_with_whitespaces() {
+        let temp_file = TempFile::new().unwrap();
+        let mut xte = Globals::default();
+
+        fs::write(&temp_file.path(), " \t \t-entry_id.desktop\t \t ").unwrap();
+
+        xte.configs = OsString::from(temp_file.path());
+
+        xte.cache_enabled = OsString::from("default value for cache_enabled");
+        xte.cache_configured = OsString::from("default value for cache_configured");
+        xte.execarg_compat = OsString::from("default value for execarg_compat");
+        xte.execarg_compat_configured =
+            OsString::from("default value for execarg_compat_configured");
+        xte.execarg_defaults = OsString::from("default value for execarg_defaults");
+        xte.entry_ids = OsString::from("default value for entry_ids");
+        xte.included_entry_ids = OsString::from("default value for included_entry_ids");
+        xte.excluded_entry_ids = OsString::from(""); // Needs to be unset
+
+        read_config_paths(&build_debugger(), &mut xte).unwrap();
+
+        assert_eq!(
+            xte.cache_enabled,
+            OsString::from("default value for cache_enabled")
+        );
+        assert_eq!(
+            xte.cache_configured,
+            OsString::from("default value for cache_configured")
+        );
+        assert_eq!(
+            xte.execarg_compat,
+            OsString::from("default value for execarg_compat")
+        );
+        assert_eq!(
+            xte.execarg_compat_configured,
+            OsString::from("default value for execarg_compat_configured")
+        );
+        assert_eq!(
+            xte.execarg_defaults,
+            OsString::from("default value for execarg_defaults")
+        );
+        assert_eq!(xte.entry_ids, OsString::from("default value for entry_ids"));
+        assert_eq!(
+            xte.included_entry_ids,
+            OsString::from("default value for included_entry_ids")
+        );
+        assert_eq!(xte.excluded_entry_ids, OsString::from("entry_id.desktop"));
+    }
+
+    #[test]
+    fn test_read_config_paths_with_an_excluded_entry_when_the_entry_was_already_included() {
+        let temp_file = TempFile::new().unwrap();
+        let mut xte = Globals::default();
+
+        fs::write(&temp_file.path(), "-entry_id.desktop").unwrap();
+
+        xte.configs = OsString::from(temp_file.path());
+
+        xte.cache_enabled = OsString::from("default value for cache_enabled");
+        xte.cache_configured = OsString::from("default value for cache_configured");
+        xte.execarg_compat = OsString::from("default value for execarg_compat");
+        xte.execarg_compat_configured =
+            OsString::from("default value for execarg_compat_configured");
+        xte.execarg_defaults = OsString::from("default value for execarg_defaults");
+        xte.entry_ids = OsString::from("default value for entry_ids");
+        xte.included_entry_ids = OsString::from("entry_id.desktop");
+        xte.excluded_entry_ids = OsString::from("default value for excluded_entry_ids");
+
+        read_config_paths(&build_debugger(), &mut xte).unwrap();
+
+        assert_eq!(
+            xte.cache_enabled,
+            OsString::from("default value for cache_enabled")
+        );
+        assert_eq!(
+            xte.cache_configured,
+            OsString::from("default value for cache_configured")
+        );
+        assert_eq!(
+            xte.execarg_compat,
+            OsString::from("default value for execarg_compat")
+        );
+        assert_eq!(
+            xte.execarg_compat_configured,
+            OsString::from("default value for execarg_compat_configured")
+        );
+        assert_eq!(
+            xte.execarg_defaults,
+            OsString::from("default value for execarg_defaults")
+        );
+        assert_eq!(xte.entry_ids, OsString::from("default value for entry_ids"));
+        assert_eq!(xte.included_entry_ids, OsString::from("entry_id.desktop"));
+        assert_eq!(
+            xte.excluded_entry_ids,
+            OsString::from("default value for excluded_entry_ids")
+        );
+    }
+
+    #[test]
+    fn test_read_config_paths_with_an_excluded_entry_when_the_entry_was_already_excluded() {
+        let temp_file = TempFile::new().unwrap();
+        let mut xte = Globals::default();
+
+        fs::write(&temp_file.path(), "-entry_id.desktop").unwrap();
+
+        xte.configs = OsString::from(temp_file.path());
+
+        xte.cache_enabled = OsString::from("default value for cache_enabled");
+        xte.cache_configured = OsString::from("default value for cache_configured");
+        xte.execarg_compat = OsString::from("default value for execarg_compat");
+        xte.execarg_compat_configured =
+            OsString::from("default value for execarg_compat_configured");
+        xte.execarg_defaults = OsString::from("default value for execarg_defaults");
+        xte.entry_ids = OsString::from("default value for entry_ids");
+        xte.included_entry_ids = OsString::from("default value for included_entry_ids");
+        xte.excluded_entry_ids = OsString::from("entry_id.desktop");
+
+        read_config_paths(&build_debugger(), &mut xte).unwrap();
+
+        assert_eq!(
+            xte.cache_enabled,
+            OsString::from("default value for cache_enabled")
+        );
+        assert_eq!(
+            xte.cache_configured,
+            OsString::from("default value for cache_configured")
+        );
+        assert_eq!(
+            xte.execarg_compat,
+            OsString::from("default value for execarg_compat")
+        );
+        assert_eq!(
+            xte.execarg_compat_configured,
+            OsString::from("default value for execarg_compat_configured")
+        );
+        assert_eq!(
+            xte.execarg_defaults,
+            OsString::from("default value for execarg_defaults")
+        );
+        assert_eq!(xte.entry_ids, OsString::from("default value for entry_ids"));
+        assert_eq!(
+            xte.included_entry_ids,
+            OsString::from("default value for included_entry_ids")
+        );
+        assert_eq!(xte.excluded_entry_ids, OsString::from("entry_id.desktop"));
     }
 
     #[test]
